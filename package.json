@@ -24,4 +24,7 @@
     "typescript": "^5.2.2"
   }
 }
-
+"dependencies": {
+  "@radix-ui/react-tabs": "^1.0.6",
+  "class-variance-authority": "^0.6.0"
+}
