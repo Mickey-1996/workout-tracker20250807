@@ -3,8 +3,8 @@
 'use client';
 
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs';
-import RecordTab from '../components/RecordTab';
-import SettingsTab from '../components/SettingsTab';
+import RecordTab from "../tabs/RecordTab";
+import SettingsTab from "../tabs/SettingsTab";
 
 export default function HomePage() {
   return (
