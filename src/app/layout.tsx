@@ -1,4 +1,4 @@
-import "../app/globals.css"; // 相対パスに変更
+import "../styles/globals.css";
 import { Inter } from "next/font/google";
 import Link from "next/link";
 import { ReactNode } from "react";
