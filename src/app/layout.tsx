@@ -1,4 +1,4 @@
-import "@/app/globals.css";  // Tailwind CSS の読み込み
+import "../app/globals.css"; // 相対パスに変更
 import { Inter } from "next/font/google";
 import Link from "next/link";
 import { ReactNode } from "react";
