@@ -1,0 +1,10 @@
+/* globals.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 任意のカスタムCSSもここに追加できます */
+body {
+  @apply bg-white text-black;
+  font-family: 'Inter', sans-serif;
+}
