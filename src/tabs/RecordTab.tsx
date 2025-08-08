@@ -1,35 +1,112 @@
-// components/RecordTab.tsx
+"use client";
 
-'use client';
+import { useState, useEffect } from "react";
+import { Checkbox } from "./ui/Checkbox";
+import { Textarea } from "./ui/Textarea";
 
-import { useState, useEffect } from 'react';
-import ExerciseSection from './ExerciseSection';
-import Notes from './Notes';
-import WeeklySummary from './WeeklySummary';
+type Record = {
+  date: string;
+  upperBodyDone: boolean[];
+  lowerBodyDone: boolean[];
+  upperBodyNote: string;
+  lowerBodyNote: string;
+};
+
+const upperExercises = [
+  "懸垂（フル）",
+  "懸垂（ネガティブ）",
+  "ダンベルローイング",
+  "ダンベルプルオーバー",
+  "ダンベルフライ",
+  "腕立て伏せ（片足など）",
+];
+
+const lowerExercises = ["バックランジ", "ワイドスクワット"];
+
+const today = new Date().toISOString().split("T")[0];
 
 export default function RecordTab() {
-  const [data, setData] = useState({});
+  const [record, setRecord] = useState<Record>(() => {
+    const saved = localStorage.getItem("training-record");
+    return (
+      (saved && JSON.parse(saved)) || {
+        date: today,
+        upperBodyDone: Array(upperExercises.length).fill(false),
+        lowerBodyDone: Array(lowerExercises.length).fill(false),
+        upperBodyNote: "",
+        lowerBodyNote: "",
+      }
+    );
+  });
 
   useEffect(() => {
-    const saved = localStorage.getItem('trainingData');
-    if (saved) setData(JSON.parse(saved));
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem('trainingData', JSON.stringify(data));
-  }, [data]);
+    localStorage.setItem("training-record", JSON.stringify(record));
+  }, [record]);
 
   return (
-    <div className="space-y-8">
-      <ExerciseSection title="上半身" category="upper" data={data} setData={setData} />
-      <ExerciseSection title="下半身" category="lower" data={data} setData={setData} />
-      <ExerciseSection title="その他" category="other" data={data} setData={setData} />
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-xl font-bold mb-2">日付: {record.date}</h2>
+      </div>
 
-      <Notes category="upper" data={data} setData={setData} />
-      <Notes category="lower" data={data} setData={setData} />
-      <Notes category="other" data={data} setData={setData} />
+      <section>
+        <h3 className="text-lg font-semibold mb-2">上半身トレーニング</h3>
+        <ul className="space-y-1">
+          {upperExercises.map((label, idx) => (
+            <li key={idx} className="flex items-center space-x-2">
+              <Checkbox
+                checked={record.upperBodyDone[idx]}
+                onCheckedChange={(checked) =>
+                  setRecord((prev) => {
+                    const updated = [...prev.upperBodyDone];
+                    updated[idx] = Boolean(checked);
+                    return { ...prev, upperBodyDone: updated };
+                  })
+                }
+              />
+              <span>{label}</span>
+            </li>
+          ))}
+        </ul>
+        <Textarea
+          className="mt-2"
+          placeholder="部位ごとのメモ（例：懸垂の回数、ダンベルの重量など）"
+          value={record.upperBodyNote}
+          onChange={(e) =>
+            setRecord((prev) => ({ ...prev, upperBodyNote: e.target.value }))
+          }
+        />
+      </section>
 
-      <WeeklySummary data={data} />
+      <section>
+        <h3 className="text-lg font-semibold mb-2">下半身トレーニング</h3>
+        <ul className="space-y-1">
+          {lowerExercises.map((label, idx) => (
+            <li key={idx} className="flex items-center space-x-2">
+              <Checkbox
+                checked={record.lowerBodyDone[idx]}
+                onCheckedChange={(checked) =>
+                  setRecord((prev) => {
+                    const updated = [...prev.lowerBodyDone];
+                    updated[idx] = Boolean(checked);
+                    return { ...prev, lowerBodyDone: updated };
+                  })
+                }
+              />
+              <span>{label}</span>
+            </li>
+          ))}
+        </ul>
+        <Textarea
+          className="mt-2"
+          placeholder="部位ごとのメモ（例：ランジの回数、負荷など）"
+          value={record.lowerBodyNote}
+          onChange={(e) =>
+            setRecord((prev) => ({ ...prev, lowerBodyNote: e.target.value }))
+          }
+        />
+      </section>
     </div>
   );
 }
+
