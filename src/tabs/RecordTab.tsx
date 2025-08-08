@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Checkbox } from "./ui/Checkbox";
-import { Textarea } from "./ui/Textarea";
+import { Checkbox } from "../components/ui/Checkbox";
+import { Textarea } from "../components//ui/Textarea";
 
 type Record = {
   date: string;
