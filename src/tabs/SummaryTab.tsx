@@ -163,11 +163,9 @@ export default function SummaryTab() {
         if (!row) continue;
 
         if (row.mode === "count") {
-          // 回数合計
           const arr = counts[it.id] || [];
           row.total += arr.reduce((s, n) => s + (Number.isFinite(n) ? (n as number) : 0), 0);
         } else {
-          // 完了セット合計（true数）
           const flags = rec.sets?.[it.id] || [];
           row.total += flags.reduce((s, b) => s + (b ? 1 : 0), 0);
         }
@@ -212,7 +210,18 @@ export default function SummaryTab() {
       <div className="grid gap-4 md:grid-cols-2">
         {/* カレンダー */}
         <Card className="p-4">
-          <h2 className="text-base font-bold mb-3">日別記録カレンダー</h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-base font-bold">日別記録カレンダー</h2>
+            <div className="flex gap-1">
+              <Button variant="secondary" onClick={() => setMonth(addDays(startOfMonth(month), -1))}>
+                ←
+              </Button>
+              <Button variant="secondary" onClick={() => setMonth(addDays(endOfMonth(month), 1))}>
+                →
+              </Button>
+            </div>
+          </div>
+
           <div className="rounded-md border p-2">
             <DayPicker
               mode="single"
@@ -221,16 +230,55 @@ export default function SummaryTab() {
               selected={selectedDate}
               onSelect={setSelectedDate}
               showOutsideDays
-              // 記録がある日を強調
-              modifiers={{ recorded: daysWithRecord }}
-              modifiersClassNames={{
-                recorded: "bg-emerald-100 rounded-full font-semibold",
+              weekStartsOn={1}
+              // ====== 指で押しやすいサイズ & スタイル（モバイル向け） ======
+              className="rdp text-[15px] sm:text-base"
+              styles={{
+                /* @ts-expect-error: CSS vars 許容 */
+                root: { ["--rdp-cell-size" as any]: "48px" },
+                head_cell: { fontSize: "12px", color: "rgb(100 116 139)" }, // slate-500
+                day: { margin: 2 }, // セル間マージン
               }}
-              className="text-sm"
+              // ====== 強調設定 ======
+              modifiers={{
+                recorded: daysWithRecord,
+                // today は library 既定でも付くが、念のため
+                today: tz(new Date()),
+              }}
+              modifiersClassNames={{
+                // 記録あり → ドット（下部に小さな丸）
+                recorded:
+                  "relative after:content-[''] after:absolute after:bottom-1.5 after:left-1/2 after:-translate-x-1/2 after:w-1.5 after:h-1.5 after:rounded-full after:bg-emerald-500",
+                // 選択日
+                selected: "bg-emerald-500 text-white hover:bg-emerald-600",
+                // 今日
+                today: "ring-2 ring-emerald-400",
+                // 月外
+                outside: "text-slate-300",
+                // 無効
+                disabled: "opacity-40",
+              }}
             />
           </div>
+
+          {/* 凡例 */}
+          <div className="mt-3 flex items-center gap-4 text-xs text-slate-600">
+            <div className="flex items-center gap-1">
+              <span className="inline-block w-2 h-2 rounded-full bg-emerald-500" />
+              記録あり
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="inline-block w-4 h-4 rounded-sm ring-2 ring-emerald-400" />
+              今日
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="inline-block w-4 h-4 rounded-sm bg-emerald-500" />
+              選択日
+            </div>
+          </div>
+
           <p className="mt-2 text-xs opacity-70">
-            緑のマークがある日には記録があります。日付をタップすると、その日の記録が右に表示されます。
+            月を移動すると、その月で記録がある日に自動でドットが表示されます。日付をタップすると、右側に内容が表示されます。
           </p>
         </Card>
 
