@@ -1,7 +1,7 @@
 // src/tabs/RecordTab.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Textarea } from "@/components/ui/Textarea";
 import { Checkbox } from "@/components/ui/Checkbox";
@@ -11,41 +11,40 @@ import Link from "next/link";
 import { loadDayRecord, saveDayRecord, loadJSON } from "@/lib/local-storage";
 import { defaultExercises } from "@/lib/exercises-default";
 
+type Category = "upper" | "lower" | "other";
+type InputMode = "check" | "count";
+
+// 設定が保存する形（最低限）
+type ExerciseItem = {
+  id: string;
+  name: string;
+  category: Category;
+  inputMode?: InputMode;
+  checkCount?: number; // check時のチェック個数
+  sets?: number;       // 旧フィールド（後方互換）
+  enabled?: boolean;
+  order?: number;
+  repTarget?: number;  // count時の目標回数（任意）
+};
+
+// 1日分の記録
 type DayRecord = {
   date: string;
   notesUpper: string;
   notesLower: string;
   notesOther?: string;
-  // チェック式: sets / 回数式: counts（どちらも同居可）
+  // チェック式の結果
   sets: Record<string, boolean[]>;
+  // 回数入力の結果（今回の追加。なければ存在しない想定）
   counts?: Record<string, number>;
-};
-
-type Category = "upper" | "lower" | "other";
-type InputMode = "check" | "count";
-
-// SettingsTab が保存している ExerciseItem と互換な最低限の形
-type ExerciseItem = {
-  id: string;
-  name: string;
-  category: Category;
-  inputMode?: InputMode;     // "check" | "count"
-  checkCount?: number;       // チェック個数（check時）
-  sets?: number;             // 旧フィールド（後方互換）
-  enabled?: boolean;
-  order?: number;
-  // 追加：回数目標（count時、設定に無ければ未定義でOK）
-  repTarget?: number;
 };
 
 type ItemUI = {
   id: string;
   name: string;
   mode: InputMode;
-  // mode=check のとき使用（表示＆保存用）
-  checks?: number;
-  // 目標表示（check: セット数 / count: 回数）
-  target?: number;
+  checks?: number; // mode=check のとき使用
+  target?: number; // 目標：check=セット数 / count=回数
 };
 
 type GroupUI = {
@@ -66,7 +65,7 @@ export default function RecordTab() {
     notesLower: "",
     notesOther: "",
     sets: {},
-    counts: {},
+    counts: {}, // 初期化しておくと以降の処理が楽
   });
   const [toast, setToast] = useState<string | null>(null);
 
@@ -75,15 +74,18 @@ export default function RecordTab() {
     window.setTimeout(() => setToast(null), 1100);
   };
 
-  // 設定があれば最優先で反映。なければ defaultExercises でフォールバック
   useEffect(() => {
     // 1) 日別レコード
-    const rec = loadDayRecord(today);
+    const rec: Partial<DayRecord> | null = loadDayRecord(today);
     if (rec) {
       setDayRecord((prev) => ({
         ...prev,
         ...rec,
-        counts: { ...(prev.counts ?? {}), ...(rec.counts ?? {}) },
+        // rec.counts が無くても問題ないように安全にマージ
+        counts: {
+          ...(prev.counts ?? {}),
+          ...(typeof (rec as any).counts === "object" && (rec as any).counts ? (rec as any).counts : {}),
+        },
       }));
     }
 
@@ -93,59 +95,45 @@ export default function RecordTab() {
     if (saved?.items?.length) {
       setGroups(buildGroupsFromSettings(saved.items));
     } else {
-      // defaultExercises（配列）を利用
       setGroups(buildGroupsFromSettings(defaultExercises as ExerciseItem[]));
     }
   }, []);
 
-  // Settings の items から UI 表示用グループを構築
   function buildGroupsFromSettings(items: ExerciseItem[]): GroupUI[] {
-    const list = items
-      .filter((x) => x.enabled !== false) // 無効は非表示
-      .map<ItemUI>((x) => {
+    const list: ItemUI[] = items
+      .filter((x) => x.enabled !== false)
+      .map((x) => {
         const mode: InputMode = x.inputMode ?? "check";
-        // check の表示個数は checkCount > sets > 3 の順
-        const checks =
-          mode === "check" ? Number(x.checkCount ?? x.sets ?? 3) || 3 : undefined;
+        const checks = mode === "check" ? Number(x.checkCount ?? x.sets ?? 3) || 3 : undefined;
         const target =
           mode === "check"
-            ? checks // “目標セット数”
+            ? checks
             : x.repTarget && Number.isFinite(x.repTarget)
-            ? Number(x.repTarget) // “目標回数”
+            ? Number(x.repTarget)
             : undefined;
-        return {
-          id: x.id,
-          name: x.name,
-          mode,
-          checks,
-          target,
-        };
+        return { id: x.id, name: x.name, mode, checks, target };
       });
 
-    const by = (cat: Category) =>
+    const pick = (cat: Category) =>
       list
-        .filter((x) => findItem(items, x.id)?.category === cat)
+        .filter((it) => items.find((x) => x.id === it.id)?.category === cat)
         .sort((a, b) => {
-          const oa = findItem(items, a.id)?.order ?? 0;
-          const ob = findItem(items, b.id)?.order ?? 0;
+          const oa = items.find((x) => x.id === a.id)?.order ?? 0;
+          const ob = items.find((x) => x.id === b.id)?.order ?? 0;
           return oa - ob;
         });
 
     return [
-      { key: "upper", label: "上半身", noteField: "notesUpper", items: by("upper") },
-      { key: "lower", label: "下半身", noteField: "notesLower", items: by("lower") },
-      { key: "other", label: "その他", noteField: "notesOther", items: by("other") },
+      { key: "upper", label: "上半身", noteField: "notesUpper", items: pick("upper") },
+      { key: "lower", label: "下半身", noteField: "notesLower", items: pick("lower") },
+      { key: "other", label: "その他", noteField: "notesOther", items: pick("other") },
     ];
-  }
-
-  function findItem(items: ExerciseItem[], id: string) {
-    return items.find((x) => x.id === id);
   }
 
   const setCount = (exerciseId: string, val: number) => {
     const counts = { ...(dayRecord.counts ?? {}) };
     counts[exerciseId] = Math.max(0, Math.floor(val || 0));
-    const updated = { ...dayRecord, counts };
+    const updated: DayRecord = { ...dayRecord, counts };
     setDayRecord(updated);
     saveDayRecord(today, updated);
     notifySaved();
@@ -156,7 +144,7 @@ export default function RecordTab() {
     if (!updatedSets[exerciseId]) updatedSets[exerciseId] = [];
     updatedSets[exerciseId][setIndex] = !updatedSets[exerciseId][setIndex];
 
-    const updatedRecord = { ...dayRecord, sets: updatedSets };
+    const updatedRecord: DayRecord = { ...dayRecord, sets: updatedSets };
     setDayRecord(updatedRecord);
     saveDayRecord(today, updatedRecord);
     notifySaved();
@@ -166,7 +154,7 @@ export default function RecordTab() {
     field: "notesUpper" | "notesLower" | "notesOther",
     value: string
   ) => {
-    const updatedRecord = { ...dayRecord, [field]: value };
+    const updatedRecord: DayRecord = { ...dayRecord, [field]: value };
     setDayRecord(updatedRecord);
     saveDayRecord(today, updatedRecord);
     notifySaved();
@@ -177,12 +165,9 @@ export default function RecordTab() {
   }
 
   const CategoryBlock = (g: GroupUI) => {
-    // チェック行の整列のため、当該カテゴリでの最大チェック数を求める
     const maxChecks = Math.max(
       0,
-      ...g.items
-        .filter((x) => x.mode === "check")
-        .map((x) => x.checks ?? 0)
+      ...g.items.filter((x) => x.mode === "check").map((x) => x.checks ?? 0)
     );
 
     return (
@@ -228,23 +213,21 @@ export default function RecordTab() {
                       gridTemplateColumns: `repeat(${Math.max(ex.checks ?? 1, maxChecks || 1)}, 2.75rem)`,
                     }}
                   >
-                    {Array.from({ length: Math.max(ex.checks ?? 0, maxChecks) || 1 }).map(
-                      (_, idx) => {
-                        const isGap = idx >= (ex.checks ?? 0);
-                        const checked = !isGap && (dayRecord.sets[ex.id]?.[idx] || false);
-                        return (
-                          <Checkbox
-                            key={idx}
-                            className={`h-11 w-11 border-2 rounded-none ${
-                              isGap ? "pointer-events-none opacity-40" : ""
-                            }`}
-                            checked={checked}
-                            onCheckedChange={() => !isGap && toggleSet(ex.id, idx)}
-                            aria-label={`${ex.name} セット${idx + 1}`}
-                          />
-                        );
-                      }
-                    )}
+                    {Array.from({ length: Math.max(ex.checks ?? 0, maxChecks) || 1 }).map((_, idx) => {
+                      const isGap = idx >= (ex.checks ?? 0);
+                      const checked = !isGap && (dayRecord.sets[ex.id]?.[idx] || false);
+                      return (
+                        <Checkbox
+                          key={idx}
+                          className={`h-11 w-11 border-2 rounded-none ${
+                            isGap ? "pointer-events-none opacity-40" : ""
+                          }`}
+                          checked={checked}
+                          onCheckedChange={() => !isGap && toggleSet(ex.id, idx)}
+                          aria-label={`${ex.name} セット${idx + 1}`}
+                        />
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -292,3 +275,4 @@ export default function RecordTab() {
     </div>
   );
 }
+
