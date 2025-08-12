@@ -1,12 +1,3 @@
 {
-  "version": 2,
-  "engines": {
-    "node": "18.x"
-  },
-  "builds": [
-    {
-      "src": "next.config.js",
-      "use": "@vercel/next"
-    }
-  ]
+  "version": 2
 }
