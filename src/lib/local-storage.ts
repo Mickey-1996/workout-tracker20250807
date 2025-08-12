@@ -1,15 +1,43 @@
 // src/lib/local-storage.ts
 "use client";
 
-import type { DayRecord, ExercisesState, ExerciseItem } from "@/lib/types";
+// --- ローカル型定義（暫定） ---
+// 将来、プロジェクトの型に合わせて import に戻してOK:
+// import type { DayRecord, ExercisesState, ExerciseItem } from "@/lib/types";
+
+type DayRecord = {
+  date: string;
+  notesUpper: string;
+  notesLower: string;
+  // 種目ID => セットごとの完了チェック
+  sets: Record<string, boolean[]>;
+};
+
+type ExercisesState = Record<
+  // 表示用カテゴリ名（例：「上半身」「下半身」「その他」）
+  string,
+  { id: string; name: string; sets: number }[]
+>;
+
+type ExerciseItem = {
+  id: string;
+  name: string;
+  category: "upper" | "lower" | "other";
+  sets?: number;
+  inputMode?: "check" | "count";
+  checkCount?: number;
+  enabled?: boolean;
+  order: number;
+};
+// --- ここまで暫定型 ---
 
 const KEYS = {
   EXERCISES: "exercises",
-  DAY_RECORD_PREFIX: "day-record-",      // 例: day-record-2025-08-12
-  SETTINGS: "settings-v1",               // SettingsTab が使うキー
+  DAY_RECORD_PREFIX: "day-record-", // 例: day-record-2025-08-12
+  SETTINGS: "settings-v1",
 } as const;
 
-// ---- 安全なLSアクセス -------------------------------------------------------
+// 安全な LS アクセス
 function safeGetItem(key: string): string | null {
   if (typeof window === "undefined") return null;
   try {
@@ -18,17 +46,16 @@ function safeGetItem(key: string): string | null {
     return null;
   }
 }
-
 function safeSetItem(key: string, value: string) {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(key, value);
   } catch {
-    // 失敗しても落とさない
+    // noop
   }
 }
 
-// ---- JSONユーティリティ（SettingsTab 用） -----------------------------------
+// JSONユーティリティ（SettingsTab 用）
 export function loadJSON<T = unknown>(key: string): T | null {
   const raw = safeGetItem(key);
   if (!raw) return null;
@@ -38,12 +65,10 @@ export function loadJSON<T = unknown>(key: string): T | null {
     return null;
   }
 }
-
 export function saveJSON(key: string, data: unknown): void {
   safeSetItem(key, JSON.stringify(data));
 }
 
-// ---- Exercises 読み書き（RecordTab 用） -------------------------------------
 // Settings から ExercisesState を合成
 function composeExercisesFromSettings(): ExercisesState | null {
   const settings = loadJSON<{ items?: ExerciseItem[] }>(KEYS.SETTINGS);
@@ -65,18 +90,19 @@ function composeExercisesFromSettings(): ExercisesState | null {
     byCat[cat].push({
       id: it.id,
       name: it.name || "（名称未設定）",
-      sets: it.checkCount ?? it.sets ?? 3, // checkCount優先
+      // 入力方式がチェックのときは checkCount を優先、無ければ sets を fallback
+      sets: it.checkCount ?? it.sets ?? 3,
     });
   }
 
-  // どれか1カテゴリでも項目があれば返す
   const hasAny =
     byCat["上半身"].length + byCat["下半身"].length + byCat["その他"].length > 0;
   return hasAny ? byCat : null;
 }
 
+// Exercises 読み込み・保存（RecordTab 用）
 export function loadExercises(): ExercisesState | null {
-  // 1) Settings優先
+  // 1) Settings 優先
   const fromSettings = composeExercisesFromSettings();
   if (fromSettings) return fromSettings;
 
@@ -89,13 +115,12 @@ export function loadExercises(): ExercisesState | null {
     return null;
   }
 }
-
 export function saveExercises(state: ExercisesState): void {
-  // 旧実装互換（Settings管理が主体になったら未使用でもOK）
+  // 旧実装互換：必要なら残す
   safeSetItem(KEYS.EXERCISES, JSON.stringify(state));
 }
 
-// ---- DayRecord（記録） -------------------------------------------------------
+// DayRecord（記録）
 export function loadDayRecord(dateISO: string): DayRecord | null {
   const key = `${KEYS.DAY_RECORD_PREFIX}${dateISO}`;
   const raw = safeGetItem(key);
@@ -106,7 +131,6 @@ export function loadDayRecord(dateISO: string): DayRecord | null {
     return null;
   }
 }
-
 export function saveDayRecord(dateISO: string, record: DayRecord): void {
   const key = `${KEYS.DAY_RECORD_PREFIX}${dateISO}`;
   safeSetItem(key, JSON.stringify(record));
