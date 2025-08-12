@@ -1,38 +1,38 @@
 // src/tabs/RecordTab.tsx
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Textarea } from "@/components/ui/Textarea";
 import { Checkbox } from "@/components/ui/Checkbox";
+import Link from "next/link";
 
 import { loadDayRecord, loadExercises, saveDayRecord } from "@/lib/local-storage";
+import { defaultExercises } from "@/lib/exercises-default";
 
-// --- ローカル型（既存データと互換） ---
+// 既存保存形式に依存しない最小型
 type DayRecord = {
   date: string;
   notesUpper: string;
   notesLower: string;
   notesOther?: string;
-  // 種目ID => セットごとの完了フラグ
   sets: Record<string, boolean[]>;
 };
 
-type ExerciseItemLike = { id: string; name: string; sets?: number; checkCount?: number };
-type ExercisesState = Record<string, ExerciseItemLike[]>;
-// ------------------------------------------------
+type ExerciseItem = {
+  id: string;
+  name: string;
+  category: "upper" | "lower" | "other";
+  sets?: number;
+  checkCount?: number;
+  enabled?: boolean;
+  order?: number;
+};
+
+type ExercisesState = Record<"upper" | "lower" | "other", { id: string; name: string; sets: number }[]>;
 
 const today = new Date().toISOString().split("T")[0];
-
-// カテゴリ名を正規化（"upper"/"lower" or 日本語）
-function classifyCategory(key: string): "upper" | "lower" | "other" {
-  const k = key.toLowerCase();
-  if (k.includes("upper") || k.includes("上")) return "upper";
-  if (k.includes("lower") || k.includes("下")) return "lower";
-  return "other";
-}
-
-const CELL = { size: "h-11 w-11" }; // 44px相当
+const CELL = { size: "h-11 w-11" }; // 44px
 
 export default function RecordTab() {
   const [exercises, setExercises] = useState<ExercisesState | null>(null);
@@ -50,32 +50,74 @@ export default function RecordTab() {
     window.setTimeout(() => setToast(null), 1100);
   };
 
+  // localStorage から読めない場合は defaultExercises でフォールバック
   useEffect(() => {
-    const loadedExercises = loadExercises();
-    if (loadedExercises) setExercises(loadedExercises);
-    const loadedRecord = loadDayRecord(today);
-    if (loadedRecord) setDayRecord((prev) => ({ ...prev, ...loadedRecord }));
+    const loaded = loadExercises();
+    if (loaded && Object.keys(loaded).length) {
+      // 既存の exercises 形式（カテゴリ -> 配列）そのまま使用
+      setExercises(normalizeLoaded(loaded));
+    } else {
+      // 初期データから UI 用の形に整形（enabled のみ）
+      setExercises(fromDefaults(defaultExercises as ExerciseItem[]));
+    }
+
+    const rec = loadDayRecord(today);
+    if (rec) setDayRecord((prev) => ({ ...prev, ...rec }));
   }, []);
 
-  // 「上/下/その他」の3ブロックへ正規化
-  const groups = useMemo(() => {
-    const g: Record<
-      "upper" | "lower" | "other",
-      { label: string; noteField: "notesUpper" | "notesLower" | "notesOther"; items: ExerciseItemLike[] }
-    > = {
-      upper: { label: "上半身", noteField: "notesUpper", items: [] },
-      lower: { label: "下半身", noteField: "notesLower", items: [] },
-      other: { label: "その他", noteField: "notesOther", items: [] },
-    };
-    if (exercises) {
-      for (const [key, arr] of Object.entries(exercises)) {
-        g[classifyCategory(key)].items.push(...arr);
+  // 読み込んだオブジェクトが { [key: string]: { id,name,sets }[] } 型に近い場合の保険
+  function normalizeLoaded(obj: any): ExercisesState {
+    const out: ExercisesState = { upper: [], lower: [], other: [] };
+    for (const [k, arr] of Object.entries(obj as Record<string, any[]>)) {
+      const cat = k.toLowerCase().includes("upper")
+        ? "upper"
+        : k.toLowerCase().includes("lower")
+        ? "lower"
+        : "other";
+      for (const it of arr) {
+        out[cat].push({
+          id: String(it.id),
+          name: String(it.name),
+          sets: Number(it.sets ?? it.checkCount ?? 3) || 3,
+        });
       }
     }
-    return g;
+    return out;
+  }
+
+  // defaultExercises（配列）→ UI 用 {upper/lower/other: …} に整形
+  function fromDefaults(list: ExerciseItem[]): ExercisesState {
+    const out: ExercisesState = { upper: [], lower: [], other: [] };
+    const add = (cat: "upper" | "lower" | "other", it: ExerciseItem) => {
+      const sets = Number(it.checkCount ?? it.sets ?? 3) || 3;
+      out[cat].push({ id: it.id, name: it.name, sets });
+    };
+    for (const it of list) {
+      if (it.enabled === false) continue; // 非表示は除外
+      add(it.category, it);
+    }
+    // order があれば並べ替え（同一カテゴリ内）
+    (["upper", "lower", "other"] as const).forEach((cat) => {
+      out[cat].sort((a, b) => {
+        const oa =
+          (list.find((x) => x.id === a.id)?.order ?? 0) as number;
+        const ob =
+          (list.find((x) => x.id === b.id)?.order ?? 0) as number;
+        return oa - ob;
+      });
+    });
+    return out;
+  }
+
+  // 表示用の3グループ
+  const groups = useMemo(() => {
+    return [
+      { key: "upper" as const, label: "上半身", noteField: "notesUpper" as const, items: exercises?.upper ?? [] },
+      { key: "lower" as const, label: "下半身", noteField: "notesLower" as const, items: exercises?.lower ?? [] },
+      { key: "other" as const, label: "その他", noteField: "notesOther" as const, items: exercises?.other ?? [] },
+    ];
   }, [exercises]);
 
-  // チェック切替
   const toggleSet = (exerciseId: string, setIndex: number) => {
     const updatedSets = { ...dayRecord.sets };
     if (!updatedSets[exerciseId]) updatedSets[exerciseId] = [];
@@ -87,7 +129,6 @@ export default function RecordTab() {
     notifySaved();
   };
 
-  // 備考更新
   const handleNotesChange = (
     field: "notesUpper" | "notesLower" | "notesOther",
     value: string
@@ -99,24 +140,20 @@ export default function RecordTab() {
   };
 
   if (!exercises) {
-    return <div className="text-sm text-muted-foreground">種目データがありません。（設定で種目を追加してください）</div>;
+    // フォールバックが効くまでの一瞬の状態
+    return <div className="text-sm text-muted-foreground">読み込み中…</div>;
   }
 
-  // 1カテゴリ分の描画
   const CategoryBlock = (
     label: string,
     noteField: "notesUpper" | "notesLower" | "notesOther",
-    list: ExerciseItemLike[]
+    list: { id: string; name: string; sets: number }[]
   ) => {
-    // 表示用のチェック数：checkCount > sets > 3
-    const boxCountOf = (ex: ExerciseItemLike) => ex.checkCount ?? ex.sets ?? 3;
-    const maxChecks = Math.max(0, ...list.map(boxCountOf));
-
+    const maxChecks = Math.max(0, ...list.map((x) => x.sets || 0));
     return (
       <Card className="p-4 space-y-3">
         <h2 className="text-base font-bold">■ {label}</h2>
 
-        {/* 見出し（記録 / ○回連続） */}
         <div className="flex items-end justify-between text-sm px-1">
           <span className="invisible">種目</span>
           <div className="flex flex-col items-center">
@@ -125,20 +162,16 @@ export default function RecordTab() {
           </div>
         </div>
 
-        {/* 種目行（列数をカテゴリ内で固定） */}
         <div className="divide-y">
           {list.map((ex) => (
             <div key={ex.id} className="flex items-center justify-between py-2">
               <div className="pr-4 leading-snug">{ex.name}</div>
-
-              {/* Grid で列数固定。足りない分は“空枠”を描画して縦揃え */}
               <div
                 className="grid gap-2"
-                style={{ gridTemplateColumns: `repeat(${maxChecks || 1}, 2.75rem)` }} // 44px
+                style={{ gridTemplateColumns: `repeat(${maxChecks || 1}, 2.75rem)` }}
               >
                 {Array.from({ length: maxChecks || 1 }).map((_, idx) => {
-                  const limit = boxCountOf(ex);
-                  const isGap = idx >= limit; // 空枠
+                  const isGap = idx >= (ex.sets || 0);
                   const checked = !isGap && (dayRecord.sets[ex.id]?.[idx] || false);
                   return (
                     <Checkbox
@@ -156,7 +189,6 @@ export default function RecordTab() {
           {list.length === 0 && <div className="py-2 text-sm opacity-60">（種目なし）</div>}
         </div>
 
-        {/* 備考 */}
         <div className="space-y-1">
           <div className="text-sm font-medium">備考</div>
           <Textarea
@@ -169,13 +201,22 @@ export default function RecordTab() {
     );
   };
 
+  const emptyAll =
+    groups.every((g) => g.items.length === 0);
+
   return (
     <div className="space-y-4">
-      {CategoryBlock(groups.upper.label, groups.upper.noteField, groups.upper.items)}
-      {CategoryBlock(groups.lower.label, groups.lower.noteField, groups.lower.items)}
-      {CategoryBlock(groups.other.label, groups.other.noteField, groups.other.items)}
+      {emptyAll && (
+        <Card className="p-4">
+          <div className="text-sm">
+            種目データが見つかりませんでした。初期データで表示しています。<br />
+            種目の追加・編集は <Link className="underline" href="/tabs/settings">設定</Link> から行えます。
+          </div>
+        </Card>
+      )}
 
-      {/* 軽量トースト */}
+      {groups.map((g) => CategoryBlock(g.label, g.noteField, g.items))}
+
       {toast && (
         <div className="fixed bottom-4 right-4 rounded-md bg-black text-white text-sm px-3 py-2 shadow-lg">
           {toast}

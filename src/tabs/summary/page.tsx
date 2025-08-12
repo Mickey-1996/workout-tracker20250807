@@ -1,5 +1,4 @@
 // src/app/tabs/summary/page.tsx
-"use client";
 
 import SummaryTab from "@/tabs/SummaryTab";
 

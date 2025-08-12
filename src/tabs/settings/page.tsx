@@ -1,5 +1,4 @@
 // src/app/tabs/settings/page.tsx
-"use client";
 
 import SettingsTab from "@/tabs/SettingsTab";
 
