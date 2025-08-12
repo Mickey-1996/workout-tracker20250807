@@ -3,175 +3,212 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { Select } from "@/components/ui/Select";
-import { Card } from "@/components/ui/Card";
-import { loadExercises, saveExercises } from "@/lib/local-storage";
-import { DEFAULT_EXERCISES } from "@/lib/exercises-default";
-import type { ExercisesState, Exercise, Category, InputMode } from "@/lib/types";
+import { Checkbox } from "@/components/ui/Checkbox";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@/components/ui/Select";
 
-const categories: { value: Category; label: string }[] = [
-  { value: "upper", label: "上半身" },
-  { value: "lower", label: "下半身" },
-  { value: "other", label: "その他" },
-];
+import type { Category, ExerciseItem, InputMode } from "@/lib/types";
+import { loadJSON, saveJSON } from "@/lib/local-storage";
+import { defaultExercises } from "@/lib/exercises-default";
 
-const modes: { value: InputMode; label: string }[] = [
-  { value: "checkbox", label: "チェックボックス" },
-  { value: "reps", label: "回数入力" },
-];
+// ---- 設定保存キー ----
+const SETTINGS_KEY = "settings-v1";
 
-function uid() {
-  return Math.random().toString(36).slice(2, 10);
+// ---- 設定型：必要な最小だけ ----
+type Settings = {
+  items: ExerciseItem[];
+};
+
+/** 空の1件を作る */
+function newItem(cat: Category): ExerciseItem {
+  return {
+    id: crypto.randomUUID(),
+    name: "",
+    category: cat,
+    sets: 3, // 初期3セット
+    inputMode: "check",
+    checkCount: 3,
+    enabled: true,
+    order: 0,
+  };
 }
 
 export default function SettingsTab() {
-  const [ex, setEx] = useState<ExercisesState | null>(null);
-  const [saved, setSaved] = useState(false);
+  const [items, setItems] = useState<ExerciseItem[]>([]); // 一覧
+  const [ready, setReady] = useState(false);
 
+  // 初期ロード
   useEffect(() => {
-    const loaded = loadExercises();
-    setEx(loaded ?? DEFAULT_EXERCISES);
+    const saved = loadJSON<Settings>(SETTINGS_KEY);
+    if (saved?.items?.length) {
+      setItems(saved.items);
+    } else {
+      // デフォルトを初期登録
+      setItems(defaultExercises);
+    }
+    setReady(true);
   }, []);
 
+  // 永続化
+  useEffect(() => {
+    if (!ready) return;
+    saveJSON(SETTINGS_KEY, { items } as Settings);
+  }, [items, ready]);
+
+  // カテゴリ別
   const byCat = useMemo(() => {
-    const items = ex?.items ?? [];
-    return {
-      upper: items.filter((i) => i.category === "upper"),
-      lower: items.filter((i) => i.category === "lower"),
-      other: items.filter((i) => i.category === "other"),
-    };
-  }, [ex]);
+    const u = items.filter((x) => x.category === "upper").sort((a, b) => a.order - b.order);
+    const l = items.filter((x) => x.category === "lower").sort((a, b) => a.order - b.order);
+    const o = items.filter((x) => x.category === "other").sort((a, b) => a.order - b.order);
+    return { upper: u, lower: l, other: o };
+  }, [items]);
 
-  if (!ex) return <p className="p-4">読み込み中…</p>;
+  // 1件更新
+  const update = (id: string, patch: Partial<ExerciseItem>) =>
+    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
 
-  const updateItem = (id: string, patch: Partial<Exercise>) => {
-    setEx((prev) =>
-      prev
-        ? {
-            ...prev,
-            items: prev.items.map((it) => (it.id === id ? { ...it, ...patch } : it)),
-          }
-        : prev
-    );
-  };
-
-  const addItem = (cat: Category) => {
-    const item: Exercise = {
-      id: uid(),
-      name: "新しい種目",
-      category: cat,
-      inputMode: "checkbox",
-      checkboxCount: 3,
-      active: true,
-    };
-    setEx((prev) => (prev ? { ...prev, items: [...prev.items, item] } : prev));
-  };
-
-  const removeItem = (id: string) => {
-    setEx((prev) => (prev ? { ...prev, items: prev.items.filter((i) => i.id !== id) } : prev));
-  };
-
-  const moveItem = (id: string, dir: -1 | 1) => {
-    setEx((prev) => {
-      if (!prev) return prev;
-      const idx = prev.items.findIndex((i) => i.id === id);
-      if (idx < 0) return prev;
-      const to = idx + dir;
-      if (to < 0 || to >= prev.items.length) return prev;
-      const arr = [...prev.items];
-      [arr[idx], arr[to]] = [arr[to], arr[idx]];
-      return { ...prev, items: arr };
+  // 追加
+  const add = (cat: Category) =>
+    setItems((prev) => {
+      const maxOrder =
+        prev.filter((x) => x.category === cat).reduce((m, x) => Math.max(m, x.order), 0) || 0;
+      const item = newItem(cat);
+      item.order = maxOrder + 1;
+      return [...prev, item];
     });
-  };
 
-  const onSave = () => {
-    if (!ex) return;
-    saveExercises(ex);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1500);
-  };
+  // 削除
+  const remove = (id: string) => setItems((prev) => prev.filter((x) => x.id !== id));
 
-  const block = (cat: Category, title: string) => {
+  // 並び替え（↑/↓）
+  const move = (id: string, dir: -1 | 1) =>
+    setItems((prev) => {
+      const arr = [...prev];
+      const idx = arr.findIndex((x) => x.id === id);
+      if (idx < 0) return prev;
+      // 同カテゴリ内だけで移動
+      const cat = arr[idx].category;
+      const sameCatIdx = arr
+        .map((x, i) => ({ x, i }))
+        .filter(({ x }) => x.category === cat)
+        .map(({ i }) => i);
+
+      const posInCat = sameCatIdx.indexOf(idx);
+      const nextPos = posInCat + dir;
+      if (nextPos < 0 || nextPos >= sameCatIdx.length) return prev;
+
+      const j = sameCatIdx[nextPos];
+      // order を交換
+      const a = arr[idx];
+      const b = arr[j];
+      const tmp = a.order;
+      a.order = b.order;
+      b.order = tmp;
+      return arr.slice();
+    });
+
+  // ブロック描画
+  const Block = (cat: Category, title: string) => {
     const list = byCat[cat];
     return (
-      <Card className="p-4 space-y-3">
+      <section className="space-y-3 rounded-xl border p-4">
         <div className="flex items-center justify-between">
           <h3 className="font-semibold">{title}</h3>
-          <Button onClick={() => addItem(cat)}>＋ 追加</Button>
+          <Button onClick={() => add(cat)}>＋ 追加</Button>
         </div>
+
         <div className="space-y-3">
+          {list.length === 0 && <p className="text-sm opacity-70">（種目なし）</p>}
           {list.map((it) => (
-            <div key={it.id} className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
-              <Input
-                className="sm:col-span-5"
-                value={it.name}
-                onChange={(e) => updateItem(it.id, { name: e.target.value })}
-                placeholder="種目名"
-              />
+            <div
+              key={it.id}
+              className="grid grid-cols-1 gap-3 sm:grid-cols-12 sm:items-center rounded-md border p-3"
+            >
+              {/* 有効/無効 */}
+              <label className="flex items-center gap-2 sm:col-span-2">
+                <Checkbox
+                  checked={it.enabled}
+                  onCheckedChange={(v) => update(it.id, { enabled: Boolean(v) })}
+                />
+                <span className="text-sm">記録対象</span>
+              </label>
+
+              {/* 名前 */}
+              <div className="sm:col-span-4">
+                <Input
+                  placeholder="種目名（例：フル懸垂 5回×3セット）"
+                  value={it.name}
+                  onChange={(e) => update(it.id, { name: e.target.value })}
+                />
+              </div>
+
+              {/* 入力方式 */}
               <Select
-               containerClassName="sm:col-span-3"
-               value={it.inputMode}
-               onValueChange={(v) => updateItem(it.id, { inputMode: v as InputMode })}
-              />
-                {modes.map((m) => (
-                  <option key={m.value} value={m.value}>
-                    {m.label}
-                  </option>
-                ))}
+                containerClassName="sm:col-span-3"
+                value={it.inputMode}
+                onValueChange={(v) => update(it.id, { inputMode: v as InputMode })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="入力方式" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="check">チェック（セットごと）</SelectItem>
+                  <SelectItem value="count">回数入力</SelectItem>
+                </SelectContent>
               </Select>
 
-              <Input
-                className="sm:col-span-2"
-                type="number"
-                min={1}
-                max={10}
-                value={it.checkboxCount}
-                onChange={(e) =>
-                  updateItem(it.id, { checkboxCount: Math.max(1, Math.min(10, Number(e.target.value || 1))) })
-                }
-                disabled={it.inputMode !== "checkbox"}
-                placeholder="個数(1-10)"
-                title="チェックボックスの個数"
-              />
+              {/* チェックボックス数（1〜10） */}
+              <div className="flex items-center gap-2 sm:col-span-2">
+                <span className="text-sm opacity-80">チェック数</span>
+                <select
+                  className="h-10 rounded-md border px-2 text-sm"
+                  value={it.checkCount ?? 3}
+                  onChange={(e) => update(it.id, { checkCount: Number(e.target.value) })}
+                  disabled={it.inputMode !== "check"}
+                >
+                  {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-              <div className="sm:col-span-2 flex gap-1 justify-end">
-                <Button variant="secondary" onClick={() => moveItem(it.id, -1)}>
-                  ▲
+              {/* 並び替え/削除 */}
+              <div className="flex gap-2 sm:col-span-1 sm:justify-end">
+                <Button variant="secondary" onClick={() => move(it.id, -1)}>
+                  ↑
                 </Button>
-                <Button variant="secondary" onClick={() => moveItem(it.id, +1)}>
-                  ▼
+                <Button variant="secondary" onClick={() => move(it.id, 1)}>
+                  ↓
                 </Button>
-                <Button variant="destructive" onClick={() => removeItem(it.id)}>
+                <Button variant="destructive" onClick={() => remove(it.id)}>
                   削除
                 </Button>
               </div>
             </div>
           ))}
-          {list.length === 0 && <p className="text-sm text-muted-foreground">まだ種目がありません。</p>}
         </div>
-      </Card>
+      </section>
     );
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <h2 className="text-xl font-bold">設定</h2>
-      {block("upper", "上半身")}
-      {block("lower", "下半身")}
-      {block("other", "その他")}
-      <div className="flex items-center gap-3">
-        <Button onClick={onSave}>保存</Button>
-        {saved && <span className="text-green-600 text-sm">保存しました。</span>}
-        <Button
-          variant="secondary"
-          onClick={() => {
-            localStorage.removeItem("exercises:v1");
-            setEx(DEFAULT_EXERCISES);
-          }}
-        >
-          初期化（種目）
-        </Button>
-      </div>
+      <p className="text-sm opacity-80">
+        ・チェックあり＝1セット、初期は3セットです。<br />
+        ・入力方式が「チェック」のときは、チェックボックスの個数（1〜10）を設定できます。
+      </p>
+
+      {Block("upper", "上半身")}
+      {Block("lower", "下半身")}
+      {Block("other", "その他")}
     </div>
   );
 }
