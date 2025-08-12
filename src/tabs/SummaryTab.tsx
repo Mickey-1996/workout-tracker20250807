@@ -1,7 +1,7 @@
 // src/tabs/SummaryTab.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -32,23 +32,17 @@ type Settings = { items: ExtendedExerciseItem[] };
 
 type DayRecord = {
   date: string;
-  // チェック入力: 種目ID => セットごとの完了フラグ
   sets: Record<string, boolean[]>;
-  // 回数入力: 種目ID => セットごとの回数（互換のため number も許容）
   counts?: Record<string, number[] | number>;
-  // 備考
   notesUpper?: string;
   notesLower?: string;
   notesOther?: string;
 };
 
 /* ===================== 日付ユーティリティ ===================== */
-const tz = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()); // ローカル日付に丸め
+const tz = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 const toStr = (d: Date) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(
-    2,
-    "0"
-  )}`;
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const addDays = (d: Date, n: number) => tz(new Date(d.getFullYear(), d.getMonth(), d.getDate() + n));
 const enumerateDates = (from: Date, to: Date) => {
   const out: string[] = [];
@@ -56,8 +50,8 @@ const enumerateDates = (from: Date, to: Date) => {
   return out;
 };
 const startOfWeekMon = (d: Date) => {
-  const day = d.getDay(); // 0:日
-  const diff = day === 0 ? -6 : 1 - day; // 月始まり
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
   return addDays(d, diff);
 };
 const startOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1);
@@ -89,7 +83,7 @@ type Row = {
   name: string;
   category: Category;
   mode: InputMode;
-  total: number;        // count: 回数合計 / check: 完了セット合計
+  total: number;
   unit: "回" | "セット";
 };
 
@@ -107,10 +101,9 @@ export default function SummaryTab() {
   }, []);
 
   // ===== カレンダー（月） =====
-  const [month, setMonth] = useState<Date>(today);           // 表示中の月
+  const [month, setMonth] = useState<Date>(today);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
   const [daysWithRecord, setDaysWithRecord] = useState<Date[]>([]);
-  // 月が変わる / 初回 に、その月で記録がある日を調べる
   useEffect(() => {
     const mStart = startOfMonth(month);
     const mEnd = endOfMonth(month);
@@ -122,7 +115,6 @@ export default function SummaryTab() {
     setDaysWithRecord(list);
   }, [month]);
 
-  // その日のスナップショット
   const [snapshot, setSnapshot] = useState<DayRecord | null>(null);
   useEffect(() => {
     if (!selectedDate) {
@@ -138,7 +130,6 @@ export default function SummaryTab() {
     if (!items.length) return [];
 
     const dates = enumerateDates(from, to);
-    // 初期化
     const acc: Record<string, Row> = {};
     for (const it of items) {
       const mode: InputMode = it.inputMode ?? "check";
@@ -152,7 +143,6 @@ export default function SummaryTab() {
       };
     }
 
-    // 走査
     for (const ds of dates) {
       const rec = loadDayRecord(ds) as DayRecord | null;
       if (!rec) continue;
@@ -172,7 +162,6 @@ export default function SummaryTab() {
       }
     }
 
-    // 表示順：カテゴリ→order→名前
     const orderMap = new Map(items.map((x) => [x.id, x.order ?? 0]));
     const catOrder: Record<Category, number> = { upper: 0, lower: 1, other: 2 };
 
@@ -185,21 +174,16 @@ export default function SummaryTab() {
     });
   }, [items, from, to]);
 
-  // クイック期間
   const setPreset = (key: "today" | "week" | "month" | "year") => {
     const base = tz(new Date());
     if (key === "today") {
-      setFrom(base);
-      setTo(base);
+      setFrom(base); setTo(base);
     } else if (key === "week") {
-      setFrom(startOfWeekMon(base));
-      setTo(base);
+      setFrom(startOfWeekMon(base)); setTo(base);
     } else if (key === "month") {
-      setFrom(startOfMonth(base));
-      setTo(base);
+      setFrom(startOfMonth(base)); setTo(base);
     } else {
-      setFrom(startOfYear(base));
-      setTo(base);
+      setFrom(startOfYear(base)); setTo(base);
     }
   };
 
@@ -223,42 +207,37 @@ export default function SummaryTab() {
           </div>
 
           <div className="rounded-md border p-2">
-            <DayPicker
-              mode="single"
-              month={month}
-              onMonthChange={setMonth}
-              selected={selectedDate}
-              onSelect={setSelectedDate}
-              showOutsideDays
-              weekStartsOn={1}
-              // ====== 指で押しやすいサイズ & スタイル（モバイル向け） ======
+            {/* CSS 変数はラッパーに適用して型安全に */}
+            <div
               className="rdp text-[15px] sm:text-base"
-              styles={{
-                /* @ts-expect-error: CSS vars 許容 */
-                root: { ["--rdp-cell-size" as any]: "48px" },
-                head_cell: { fontSize: "12px", color: "rgb(100 116 139)" }, // slate-500
-                day: { margin: 2 }, // セル間マージン
-              }}
-              // ====== 強調設定 ======
-              modifiers={{
-                recorded: daysWithRecord,
-                // today は library 既定でも付くが、念のため
-                today: tz(new Date()),
-              }}
-              modifiersClassNames={{
-                // 記録あり → ドット（下部に小さな丸）
-                recorded:
-                  "relative after:content-[''] after:absolute after:bottom-1.5 after:left-1/2 after:-translate-x-1/2 after:w-1.5 after:h-1.5 after:rounded-full after:bg-emerald-500",
-                // 選択日
-                selected: "bg-emerald-500 text-white hover:bg-emerald-600",
-                // 今日
-                today: "ring-2 ring-emerald-400",
-                // 月外
-                outside: "text-slate-300",
-                // 無効
-                disabled: "opacity-40",
-              }}
-            />
+              style={{ ["--rdp-cell-size" as any]: "48px" } as CSSProperties}
+            >
+              <DayPicker
+                mode="single"
+                month={month}
+                onMonthChange={setMonth}
+                selected={selectedDate}
+                onSelect={setSelectedDate}
+                showOutsideDays
+                weekStartsOn={1}
+                styles={{
+                  head_cell: { fontSize: "12px", color: "rgb(100 116 139)" } as CSSProperties,
+                  day: { margin: 2 } as CSSProperties,
+                }}
+                modifiers={{
+                  recorded: daysWithRecord,
+                  today: tz(new Date()),
+                }}
+                modifiersClassNames={{
+                  recorded:
+                    "relative after:content-[''] after:absolute after:bottom-1.5 after:left-1/2 after:-translate-x-1/2 after:w-1.5 after:h-1.5 after:rounded-full after:bg-emerald-500",
+                  selected: "bg-emerald-500 text-white hover:bg-emerald-600",
+                  today: "ring-2 ring-emerald-400",
+                  outside: "text-slate-300",
+                  disabled: "opacity-40",
+                }}
+              />
+            </div>
           </div>
 
           {/* 凡例 */}
@@ -348,10 +327,9 @@ export default function SummaryTab() {
                       })}
                     </div>
 
-                    {/* 備考 */}
-                    {((cat === "upper" && snapshot.notesUpper) ||
-                      (cat === "lower" && snapshot.notesLower) ||
-                      (cat === "other" && snapshot.notesOther)) && (
+                    {( (cat === "upper" && snapshot.notesUpper) ||
+                       (cat === "lower" && snapshot.notesLower) ||
+                       (cat === "other" && snapshot.notesOther) ) && (
                       <div className="mt-2 text-xs opacity-80 whitespace-pre-wrap">
                         {cat === "upper" ? snapshot.notesUpper : cat === "lower" ? snapshot.notesLower : snapshot.notesOther}
                       </div>
@@ -397,10 +375,9 @@ export default function SummaryTab() {
         </div>
       </Card>
 
-      {/* 種目別集計のみ（カテゴリ合計は非表示） */}
+      {/* 種目別集計のみ */}
       <Card className="p-4">
         <h2 className="text-base font-bold mb-3">種目別集計</h2>
-
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
