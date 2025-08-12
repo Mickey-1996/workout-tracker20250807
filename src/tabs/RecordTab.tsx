@@ -1,5 +1,6 @@
-// 記録タブ：回数入力は選択式（0〜99）、チェックは最大5個表示。
-// 「ノルマ…」の小さな説明行は表示しない。「その他」空時の説明も非表示。
+// 記録タブ：回数入力は選択式（0〜99）
+// 「ノルマ…」は未選択時にセレクトのプレースホルダとして薄表示
+// 「その他」空時の（種目なし）行は表示しない
 
 "use client";
 
@@ -24,7 +25,7 @@ type ExtendedExerciseItem = {
   sets?: number;
   enabled?: boolean;
   order?: number;
-  repTarget?: number;
+  repTarget?: number; // ノルマ回数
 };
 
 type DayRecord = {
@@ -32,8 +33,8 @@ type DayRecord = {
   notesUpper: string;
   notesLower: string;
   notesOther?: string;
-  sets: Record<string, boolean[]>;         // チェック方式
-  counts?: Record<string, number[] | number>; // 回数方式（互換）
+  sets: Record<string, boolean[]>;                   // チェック方式
+  counts?: Record<string, (number | null)[] | number>; // 回数方式（互換：number も許容）
 };
 
 type ItemUI = {
@@ -41,7 +42,7 @@ type ItemUI = {
   name: string;
   mode: InputMode;
   checks: number;      // セット数
-  target?: number;     // ノルマ回数（count の placeholderには使わないが保持）
+  target?: number;     // ノルマ回数（count の placeholder 表示用）
 };
 
 type GroupUI = {
@@ -54,13 +55,18 @@ type GroupUI = {
 const SETTINGS_KEY = "settings-v1";
 const today = new Date().toISOString().split("T")[0];
 
-/** counts が number の場合を配列へ正規化 */
-function normalizeCounts(counts: DayRecord["counts"]): Record<string, number[]> {
-  if (!counts || typeof counts !== "object") return {};
-  const out: Record<string, number[]> = {};
+/** counts を UI 向けに正規化（数値以外は null に） */
+function normalizeCounts(counts: DayRecord["counts"]): Record<string, (number | null)[]> {
+  const out: Record<string, (number | null)[]> = {};
+  if (!counts || typeof counts !== "object") return out;
   for (const [k, v] of Object.entries(counts)) {
-    if (Array.isArray(v)) out[k] = v.map((n) => Math.max(0, Math.floor(Number(n) || 0)));
-    else if (typeof v === "number") out[k] = [Math.max(0, Math.floor(v))];
+    if (Array.isArray(v)) {
+      out[k] = v.map((n) =>
+        Number.isFinite(Number(n)) ? Math.max(0, Math.floor(Number(n))) : null
+      );
+    } else if (typeof v === "number") {
+      out[k] = [Math.max(0, Math.floor(v))];
+    }
   }
   return out;
 }
@@ -130,13 +136,12 @@ export default function RecordTab() {
     ];
   }
 
-  // 回数入力：選択値を保存
+  // 回数入力：選択値を保存（未選択は空のままにする）
   const setCountAt = (exerciseId: string, setIndex: number, val: number) => {
-    const counts = normalizeCounts(dayRecord.counts);
-    const arr = (counts[exerciseId] ?? []).slice();
-    for (let i = arr.length; i <= setIndex; i++) arr[i] = 0;
+    const countsMap = normalizeCounts(dayRecord.counts);
+    const arr = (countsMap[exerciseId] ?? []).slice();
     arr[setIndex] = Math.max(0, Math.floor(val || 0));
-    const updated: DayRecord = { ...dayRecord, counts: { ...counts, [exerciseId]: arr } };
+    const updated: DayRecord = { ...dayRecord, counts: { ...countsMap, [exerciseId]: arr } };
     setDayRecord(updated);
     saveDayRecord(today, updated);
     ping();
@@ -169,25 +174,39 @@ export default function RecordTab() {
   function ExerciseRow({ ex }: { ex: ItemUI }) {
     // チェックは最大5個まで表示（UI崩れ防止）
     const checksToShow = ex.mode === "check" ? Math.min(ex.checks, 5) : Math.max(ex.checks, 1);
+    const countsMap = normalizeCounts(dayRecord.counts);
 
     return (
       <div className="py-3">
-        {/* 1行目：種目名のみ（ノルマ小表示は削除済み） */}
+        {/* 1行目：種目名のみ（ノルマ小表示は行頭には出さない） */}
         <div className="font-medium leading-tight">{ex.name}</div>
 
         {/* 2行目：入力UI（折返し可能） */}
         {ex.mode === "count" ? (
           <div className="mt-2 flex flex-wrap gap-2">
             {Array.from({ length: checksToShow }).map((_, idx) => {
-              const current = normalizeCounts(dayRecord.counts)[ex.id]?.[idx] ?? 0;
+              const cur = countsMap[ex.id]?.[idx]; // number | null | undefined
+              const isBlank = cur == null;
+              const value = isBlank ? "" : String(cur);
               return (
                 <div key={idx} className="flex items-center gap-1">
                   <select
-                    className="h-10 rounded-md border px-2 text-sm w-16"
-                    value={current}
-                    onChange={(e) => setCountAt(ex.id, idx, Number(e.target.value))}
+                    className={
+                      "h-10 rounded-md border px-2 text-sm w-20 " +
+                      (isBlank ? "text-muted-foreground" : "")
+                    }
+                    value={value}
+                    onChange={(e) => {
+                      const v = e.target.value === "" ? null : Number(e.target.value);
+                      if (v === null) return; // placeholder は保存しない
+                      setCountAt(ex.id, idx, v);
+                    }}
                     aria-label={`${ex.name} セット${idx + 1} 回数`}
                   >
+                    {/* プレースホルダ（薄表示）：ノルマ回数があれば表示 */}
+                    <option value="" disabled>
+                      {ex.target ? `ノルマ ${ex.target}` : "選択"}
+                    </option>
                     {Array.from({ length: 100 }, (_, n) => n).map((n) => (
                       <option key={n} value={n}>
                         {n}
@@ -232,8 +251,7 @@ export default function RecordTab() {
           {g.items.map((ex) => (
             <ExerciseRow key={ex.id} ex={ex} />
           ))}
-
-          {/* 「その他」エリアは空でも説明行を出さない */}
+          {/* 「その他」空時の説明行は出さない */}
           {g.items.length === 0 && g.cat !== "other" && (
             <div className="py-2 text-sm opacity-60">（種目なし）</div>
           )}
@@ -281,4 +299,3 @@ export default function RecordTab() {
     </div>
   );
 }
-
