@@ -1,5 +1,4 @@
 // src/app/tabs/summary/page.tsx
-
 import SummaryTab from "@/tabs/SummaryTab";
 
 export default function SummaryPage() {

@@ -1,3 +1,4 @@
+// src/tabs/SettingsTab.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -17,7 +18,6 @@ import { loadJSON, saveJSON } from "@/lib/local-storage";
 import { defaultExercises } from "@/lib/exercises-default";
 
 const SETTINGS_KEY = "settings-v1";
-
 type Settings = { items: ExerciseItem[] };
 
 function newItem(cat: Category): ExerciseItem {
@@ -25,7 +25,6 @@ function newItem(cat: Category): ExerciseItem {
     id: crypto.randomUUID(),
     name: "",
     category: cat,
-    // 旧仕様互換のためいずれも optional だが初期値を持たせる
     sets: 3,
     inputMode: "check",
     checkCount: 3,
@@ -38,7 +37,6 @@ export default function SettingsTab() {
   const [items, setItems] = useState<ExerciseItem[]>([]);
   const [ready, setReady] = useState(false);
 
-  // 初期ロード
   useEffect(() => {
     const saved = loadJSON<Settings>(SETTINGS_KEY);
     if (saved?.items?.length) {
@@ -49,15 +47,13 @@ export default function SettingsTab() {
     setReady(true);
   }, []);
 
-  // 自動保存
   useEffect(() => {
     if (!ready) return;
     saveJSON(SETTINGS_KEY, { items });
   }, [items, ready]);
 
-  // カテゴリ別へ
   const byCat = useMemo(() => {
-    const sortByOrder = (a: ExerciseItem, b: ExerciseItem) => a.order - b.order;
+    const sortByOrder = (a: ExerciseItem, b: ExerciseItem) => (a.order ?? 0) - (b.order ?? 0);
     return {
       upper: items.filter((x) => x.category === "upper").sort(sortByOrder),
       lower: items.filter((x) => x.category === "lower").sort(sortByOrder),
@@ -65,13 +61,13 @@ export default function SettingsTab() {
     };
   }, [items]);
 
-  const update = (id: string, patch: Partial<ExerciseItem>) =>
+  const update = (id: string, patch: Partial<ExerciseItem> | Record<string, unknown>) =>
     setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
 
   const add = (cat: Category) =>
     setItems((prev) => {
       const maxOrder =
-        prev.filter((x) => x.category === cat).reduce((m, x) => Math.max(m, x.order), 0) || 0;
+        prev.filter((x) => x.category === cat).reduce((m, x) => Math.max(m, x.order ?? 0), 0) || 0;
       const item = newItem(cat);
       item.order = maxOrder + 1;
       return [...prev, item];
@@ -97,16 +93,11 @@ export default function SettingsTab() {
       const j = sameCatIdx[nextPos];
       const a = arr[idx];
       const b = arr[j];
-      const tmp = a.order;
-      a.order = b.order;
+      const tmp = a.order ?? 0;
+      a.order = b.order ?? 0;
       b.order = tmp;
       return arr.slice();
     });
-
-  const loadDefaults = () => {
-    if (!confirm("初期データ（要件どおりの種目リスト）を読み込みます。よろしいですか？ 現在の種目は上書きされます。")) return;
-    setItems(defaultExercises);
-  };
 
   const Block = (cat: Category, title: string) => {
     const list = byCat[cat];
@@ -124,28 +115,25 @@ export default function SettingsTab() {
               key={it.id}
               className="grid grid-cols-1 gap-3 sm:grid-cols-12 sm:items-center rounded-md border p-3"
             >
-              {/* 記録対象 */}
               <label className="flex items-center gap-2 sm:col-span-2">
                 <Checkbox
-                  checked={it.enabled ?? true}
+                  checked={it.enabled !== false}
                   onCheckedChange={(v) => update(it.id, { enabled: Boolean(v) })}
                 />
                 <span className="text-sm">記録対象</span>
               </label>
 
-              {/* 種目名 */}
-              <div className="sm:col-span-4">
+              <div className="sm:col-span-3">
                 <Input
-                  placeholder="種目名（例：ダンベルベントロウ 15回×3セット）"
+                  placeholder="種目名（例：フル懸垂 10回）"
                   value={it.name}
                   onChange={(e) => update(it.id, { name: e.target.value })}
                 />
               </div>
 
-              {/* 入力方式 */}
               <div className="sm:col-span-3">
                 <Select
-                  value={it.inputMode ?? "check"}
+                  value={(it.inputMode as InputMode) ?? "check"}
                   onValueChange={(v) => update(it.id, { inputMode: v as InputMode })}
                 >
                   <SelectTrigger>
@@ -158,17 +146,14 @@ export default function SettingsTab() {
                 </Select>
               </div>
 
-              {/* チェック数（1〜10） */}
+              {/* チェック数（check のときだけ編集可能） */}
               <div className="flex items-center gap-2 sm:col-span-2">
                 <span className="text-sm opacity-80">チェック数</span>
                 <select
                   className="h-10 rounded-md border px-2 text-sm"
                   value={it.checkCount ?? it.sets ?? 3}
-                  onChange={(e) => {
-                    const n = Number(e.target.value);
-                    update(it.id, { checkCount: n, sets: n });
-                  }}
-                  disabled={(it.inputMode ?? "check") !== "check"}
+                  onChange={(e) => update(it.id, { checkCount: Number(e.target.value), sets: Number(e.target.value) })}
+                  disabled={it.inputMode !== "check"}
                 >
                   {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
                     <option key={n} value={n}>
@@ -178,8 +163,22 @@ export default function SettingsTab() {
                 </select>
               </div>
 
-              {/* 並び替え / 削除 */}
-              <div className="flex gap-2 sm:col-span-1 sm:justify-end">
+              {/* 回数目標（count のときだけ編集可能） */}
+              <div className="flex items-center gap-2 sm:col-span-2">
+                <span className="text-sm opacity-80">回数目標</span>
+                <Input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  placeholder="例: 10"
+                  value={Number((it as any).repTarget ?? "")}
+                  onChange={(e) => update(it.id, { repTarget: Number(e.target.value) } as any)}
+                  disabled={it.inputMode !== "count"}
+                  className="w-24"
+                />
+              </div>
+
+              <div className="flex gap-2 sm:col-span-2 sm:justify-end">
                 <Button variant="secondary" onClick={() => move(it.id, -1)}>
                   ↑
                 </Button>
@@ -201,29 +200,13 @@ export default function SettingsTab() {
     <div className="space-y-6">
       <h2 className="text-xl font-bold">設定</h2>
       <p className="text-sm opacity-80">
-        ・チェックあり＝1セット、初期は3セットです。<br />
-        ・入力方式が「チェック」のときは、チェックボックスの個数（1〜10）を設定できます。<br />
-        ・「回数入力」を選ぶとチェックは無効になり、記録画面で回数を入力する拡張に備えます。
+        ・「入力方式」で <strong>チェック</strong>（セットごと）か <strong>回数入力</strong> を選択できます。<br />
+        ・チェック方式は「チェック数」でセット数を指定、回数入力は「回数目標」を任意指定できます。<br />
       </p>
 
       {Block("upper", "上半身")}
       {Block("lower", "下半身")}
       {Block("other", "その他")}
-
-      <div className="rounded-xl border p-4 space-y-3">
-        <h3 className="font-semibold">データ管理</h3>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" onClick={loadDefaults}>
-            初期データを読み込む（種目のみ）
-          </Button>
-          {/* すべてリセット：必要ならコメントアウト解除
-          <Button variant="destructive" onClick={resetAll}>すべてリセット</Button>
-          */}
-        </div>
-        <p className="text-xs opacity-70">
-          ※「初期データを読み込む」は種目設定のみ上書きします。記録データは保持されます。
-        </p>
-      </div>
     </div>
   );
 }

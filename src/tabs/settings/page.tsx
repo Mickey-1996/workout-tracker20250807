@@ -1,5 +1,4 @@
 // src/app/tabs/settings/page.tsx
-
 import SettingsTab from "@/tabs/SettingsTab";
 
 export default function SettingsPage() {
