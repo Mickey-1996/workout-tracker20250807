@@ -14,9 +14,14 @@ import {
 } from "@/components/ui/Select";
 import { loadDayRecord, saveDayRecord, loadJSON } from "@/lib/local-storage";
 
-/* ========= メモ欄の記述例（全カテゴリ同一） ========= */
+/* ========= メモ欄の記述例（全カテゴリ共通） ========= */
 const MEMO_EXAMPLE = "（例）アーチャープッシュアップも10回やった";
-/* ================================================= */
+/* ================================================ */
+
+/** セルサイズ／行幅（回数入力とチェックを揃える） */
+const CELL_H = "h-10";          // 40px
+const CELL_W = "w-10";          // 40px（回数表示は2桁想定）
+const GRID_W = "w-[136px]";     // 3セル(3*40) + ギャップ(2*8) = 136px
 
 type DayRecord = {
   date: string;
@@ -243,10 +248,11 @@ export default function RecordTab() {
                     </div>
                   </div>
 
-                  {/* 2行目：入力行（どちらのモードも右寄せ） */}
-                  <div className="mt-2 flex flex-wrap gap-2 justify-end pr-2">
-                    {mode === "count"
-                      ? Array.from({ length: setCount }).map((_, idx) => {
+                  {/* 2行目：入力行（右寄せ・固定幅）。どちらも3列で改行 */}
+                  <div className={`mt-2 ${GRID_W} ml-auto`}>
+                    {mode === "count" ? (
+                      <div className="grid grid-cols-3 gap-2">
+                        {Array.from({ length: setCount }).map((_, idx) => {
                           const cur = dayRecord.counts?.[ex.id]?.[idx] ?? 0;
                           return (
                             <Select
@@ -254,7 +260,7 @@ export default function RecordTab() {
                               value={String(cur)}
                               onValueChange={(v) => changeCount(ex.id, idx, v)}
                             >
-                              <SelectTrigger className="h-8 w-16 text-xs px-2">
+                              <SelectTrigger className={`${CELL_H} ${CELL_W} text-xs px-1`}>
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent className="max-h-64">
@@ -266,21 +272,27 @@ export default function RecordTab() {
                               </SelectContent>
                             </Select>
                           );
-                        })
-                      : Array.from({ length: setCount }).map((_, idx) => (
-                          <Checkbox
-                            key={idx}
-                            checked={dayRecord.sets?.[ex.id]?.[idx] || false}
-                            onCheckedChange={() => toggleSet(ex.id, idx)}
-                            className="h-8 w-8"
-                          />
+                        })}
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-3 gap-2">
+                        {Array.from({ length: setCount }).map((_, idx) => (
+                          <div key={idx} className={`flex items-center justify-center ${CELL_H} ${CELL_W}`}>
+                            <Checkbox
+                              checked={dayRecord.sets?.[ex.id]?.[idx] || false}
+                              onCheckedChange={() => toggleSet(ex.id, idx)}
+                              className={`${CELL_H} ${CELL_W}`}
+                            />
+                          </div>
                         ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               );
             })}
 
-            {/* カテゴリ別メモ欄（記述例は全カテゴリ同一） */}
+            {/* カテゴリ別メモ欄（記述例は共通） */}
             <div className="mt-2">
               <label className="block text-xs font-medium mb-1">
                 {cat === "upper" ? "上半身メモ" : cat === "lower" ? "下半身メモ" : "その他メモ"}
