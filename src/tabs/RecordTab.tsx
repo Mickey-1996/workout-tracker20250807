@@ -5,14 +5,19 @@ import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Textarea } from "@/components/ui/Textarea";
 import { Checkbox } from "@/components/ui/Checkbox";
-import { Input } from "@/components/ui/Input";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@/components/ui/Select";
 import { loadDayRecord, saveDayRecord, loadJSON } from "@/lib/local-storage";
 
 /* ========= メモ欄の記述例（全カテゴリ同一） ========= */
 const MEMO_EXAMPLE = "（例）アーチャープッシュアップも10回やった";
 /* ================================================= */
 
-/* 画面内の軽量型（他ファイル変更なし） */
 type DayRecord = {
   date: string;
   notesUpper: string;
@@ -52,14 +57,12 @@ type MetaMap = Record<
   }
 >;
 
-/* 日付ユーティリティ */
 const todayStr = new Date().toISOString().split("T")[0];
 const fmtDateJP = (iso: string) => {
   const [y, m, d] = iso.split("-").map(Number);
   return `${y}年${m}月${d}日`;
 };
 
-/* 経過時間（時間） */
 const hoursSince = (iso?: string): number | null => {
   if (!iso) return null;
   const last = new Date(iso).getTime();
@@ -68,12 +71,13 @@ const hoursSince = (iso?: string): number | null => {
   return Math.max(0, Math.floor((now - last) / 3600000));
 };
 
-/* 最終実施の記録（exerciseId => ISO） */
 const LAST_DONE_KEY = "last-done-v1";
 type LastDoneMap = Record<string, string>;
 
+const COUNT_MAX = 99;
+
 export default function RecordTab() {
-  /* 設定→メタ（モード・セット・ノルマ） */
+  // 設定→メタ
   const [meta, setMeta] = useState<MetaMap>({});
   useEffect(() => {
     const settings = loadJSON<Settings>("settings-v1");
@@ -87,7 +91,7 @@ export default function RecordTab() {
     setMeta(m);
   }, []);
 
-  /* カテゴリ別の配列を生成 */
+  // カテゴリ別配列
   const [exercises, setExercises] = useState<ExercisesState | null>(null);
   useEffect(() => {
     if (Object.keys(meta).length) {
@@ -106,7 +110,7 @@ export default function RecordTab() {
     }
   }, [meta]);
 
-  /* 当日レコード */
+  // 当日レコード
   const [dayRecord, setDayRecord] = useState<DayRecord>({
     date: todayStr,
     notesUpper: "",
@@ -132,11 +136,10 @@ export default function RecordTab() {
 
   const persist = (rec: DayRecord) => {
     setDayRecord(rec);
-    // 型の衝突を避ける（ライブラリ側の型定義と画面内型を切り離し）
-    (saveDayRecord as any)(todayStr, rec);
+    (saveDayRecord as any)(todayStr, rec); // 型衝突回避
   };
 
-  /* 最終実施 */
+  // 最終実施
   const [lastDone, setLastDone] = useState<LastDoneMap>({});
   useEffect(() => {
     const map = loadJSON<LastDoneMap>(LAST_DONE_KEY) ?? {};
@@ -153,7 +156,7 @@ export default function RecordTab() {
     });
   };
 
-  /* チェック切り替え */
+  // チェック切替
   const toggleSet = (exerciseId: string, setIndex: number) => {
     const sets = { ...(dayRecord.sets || {}) };
     const arr = [...(sets[exerciseId] ?? [])];
@@ -166,7 +169,7 @@ export default function RecordTab() {
     if (arr[setIndex]) updateLastDone(exerciseId);
   };
 
-  /* 回数入力 */
+  // 回数選択
   const changeCount = (exerciseId: string, setIndex: number, value: string) => {
     let n = Math.floor(Number(value || "0"));
     if (!Number.isFinite(n) || n < 0) n = 0;
@@ -184,14 +187,14 @@ export default function RecordTab() {
     if (n > 0) updateLastDone(exerciseId);
   };
 
-  /* メモ（カテゴリ別） */
+  // メモ
   const handleCatNotesChange = (cat: Category, value: string) => {
     if (cat === "upper") return persist({ ...dayRecord, notesUpper: value ?? "" });
     if (cat === "lower") return persist({ ...dayRecord, notesLower: value ?? "" });
     return persist({ ...dayRecord, notesOther: value ?? "" });
   };
 
-  /* 表示ラベルなど */
+  // 表示ラベル
   const recoveryText = (exerciseId: string) => {
     const h = hoursSince(lastDone[exerciseId]);
     if (h == null) return "—";
@@ -240,24 +243,28 @@ export default function RecordTab() {
                     </div>
                   </div>
 
-                  {/* 2行目：入力行（回数は小さめ・チェックはやや大きめ） */}
+                  {/* 2行目：入力行（回数は選択式・チェックは少し大きめ） */}
                   <div className="mt-2 flex flex-wrap gap-2">
                     {mode === "count"
                       ? Array.from({ length: setCount }).map((_, idx) => {
-                          const cur = dayRecord.counts?.[ex.id]?.[idx] ?? "";
-                          const ph = m.repTarget ? String(m.repTarget) : "";
+                          const cur = dayRecord.counts?.[ex.id]?.[idx] ?? 0;
                           return (
-                            <Input
+                            <Select
                               key={idx}
-                              type="number"
-                              inputMode="numeric"
-                              min={0}
-                              step={1}
-                              placeholder={ph}
-                              className="h-8 w-14 text-xs px-2"
-                              value={cur === 0 ? "" : String(cur)}
-                              onChange={(e) => changeCount(ex.id, idx, e.target.value)}
-                            />
+                              value={String(cur)}
+                              onValueChange={(v) => changeCount(ex.id, idx, v)}
+                            >
+                              <SelectTrigger className="h-8 w-16 text-xs px-2">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent className="max-h-64">
+                                {Array.from({ length: COUNT_MAX + 1 }, (_, n) => (
+                                  <SelectItem key={n} value={String(n)}>
+                                    {n}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
                           );
                         })
                       : Array.from({ length: setCount }).map((_, idx) => (
@@ -265,7 +272,7 @@ export default function RecordTab() {
                             key={idx}
                             checked={dayRecord.sets?.[ex.id]?.[idx] || false}
                             onCheckedChange={() => toggleSet(ex.id, idx)}
-                            className="h-6 w-6"
+                            className="h-7 w-7"
                           />
                         ))}
                   </div>
