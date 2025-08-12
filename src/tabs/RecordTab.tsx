@@ -35,7 +35,7 @@ type DayRecord = {
   notesOther?: string;
   // チェック式の結果
   sets: Record<string, boolean[]>;
-  // 回数入力の結果（今回の追加。なければ存在しない想定）
+  // 回数入力の結果
   counts?: Record<string, number>;
 };
 
@@ -48,7 +48,7 @@ type ItemUI = {
 };
 
 type GroupUI = {
-  key: Category;
+  cat: Category; // ← key という名前は使わない
   label: string;
   noteField: "notesUpper" | "notesLower" | "notesOther";
   items: ItemUI[];
@@ -124,9 +124,9 @@ export default function RecordTab() {
         });
 
     return [
-      { key: "upper", label: "上半身", noteField: "notesUpper", items: pick("upper") },
-      { key: "lower", label: "下半身", noteField: "notesLower", items: pick("lower") },
-      { key: "other", label: "その他", noteField: "notesOther", items: pick("other") },
+      { cat: "upper", label: "上半身", noteField: "notesUpper", items: pick("upper") },
+      { cat: "lower", label: "下半身", noteField: "notesLower", items: pick("lower") },
+      { cat: "other", label: "その他", noteField: "notesOther", items: pick("other") },
     ];
   }
 
@@ -164,7 +164,8 @@ export default function RecordTab() {
     return <div className="text-sm text-muted-foreground">読み込み中…</div>;
   }
 
-  const CategoryBlock = (g: GroupUI) => {
+  function CategoryBlock({ group }: { group: GroupUI }) {
+    const g = group;
     const maxChecks = Math.max(
       0,
       ...g.items.filter((x) => x.mode === "check").map((x) => x.checks ?? 0)
@@ -248,7 +249,7 @@ export default function RecordTab() {
         </div>
       </Card>
     );
-  };
+  }
 
   const allEmpty = groups.every((g) => g.items.length === 0);
 
@@ -264,7 +265,7 @@ export default function RecordTab() {
       )}
 
       {groups.map((g) => (
-        <CategoryBlock key={g.key} {...g} />
+        <CategoryBlock key={g.cat} group={g} />
       ))}
 
       {toast && (
@@ -275,4 +276,3 @@ export default function RecordTab() {
     </div>
   );
 }
-
