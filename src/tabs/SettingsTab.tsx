@@ -1,4 +1,3 @@
-// src/tabs/SettingsTab.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -111,11 +110,13 @@ export default function SettingsTab() {
 
         <div className="space-y-3">
           {list.length === 0 && <p className="text-sm opacity-70">（種目なし）</p>}
+
           {list.map((it) => (
             <div
               key={it.id}
               className="grid grid-cols-1 gap-3 sm:grid-cols-12 sm:items-center rounded-md border p-3"
             >
+              {/* 記録対象 */}
               <label className="flex items-center gap-2 sm:col-span-2">
                 <Checkbox
                   checked={it.enabled}
@@ -124,6 +125,7 @@ export default function SettingsTab() {
                 <span className="text-sm">記録対象</span>
               </label>
 
+              {/* 種目名 */}
               <div className="sm:col-span-4">
                 <Input
                   placeholder="種目名（例：フル懸垂 5回×3セット）"
@@ -132,6 +134,7 @@ export default function SettingsTab() {
                 />
               </div>
 
+              {/* 入力方式 */}
               <div className="sm:col-span-3">
                 <Select
                   value={it.inputMode}
@@ -147,26 +150,45 @@ export default function SettingsTab() {
                 </Select>
               </div>
 
-              {/* セット数：数値で直接入力できるように変更（count時も常に編集可） */}
+              {/* セット数（選択式・countでも常に編集可） */}
               <div className="flex items-center gap-2 sm:col-span-2">
                 <span className="text-sm opacity-80">セット数</span>
-                <Input
-                  type="number"
-                  inputMode="numeric"
-                  min={1}
-                  max={20}
-                  step={1}
-                  className="w-24"
+                <select
+                  className="h-10 rounded-md border px-2 text-sm"
                   value={it.checkCount ?? 3}
-                  onChange={(e) => {
-                    const raw = Number(e.target.value);
-                    const n = Number.isFinite(raw) ? Math.floor(raw) : 1;
-                    const clamped = Math.min(20, Math.max(1, n));
-                    update(it.id, { checkCount: clamped });
-                  }}
-                />
+                  onChange={(e) => update(it.id, { checkCount: Number(e.target.value) })}
+                >
+                  {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
               </div>
 
+              {/* ノルマ回数（countのときだけ表示） */}
+              {it.inputMode === "count" && (
+                <div className="flex items-center gap-2 sm:col-span-1">
+                  <span className="text-sm opacity-80">ノルマ回数</span>
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    max={500}
+                    step={1}
+                    className="w-24"
+                    value={it.repTarget ?? ""}
+                    onChange={(e) =>
+                      update(it.id, {
+                        repTarget: e.target.value === "" ? undefined : Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                      })
+                    }
+                    placeholder="例: 10"
+                  />
+                </div>
+              )}
+
+              {/* 並び替え/削除 */}
               <div className="flex gap-2 sm:col-span-1 sm:justify-end">
                 <Button variant="secondary" onClick={() => move(it.id, -1)}>
                   ↑
@@ -189,8 +211,8 @@ export default function SettingsTab() {
     <div className="space-y-6">
       <h2 className="text-xl font-bold">設定</h2>
       <p className="text-sm opacity-80">
-        ・「セット数」はチェック方式のチェック個数、回数入力方式の“セット数”の両方に使われます（1〜20）。<br />
-        ・回数入力を選ぶと、記録画面ではセット数ぶんの回数入力欄が表示されます。
+        ・「セット数」はチェック方式と回数入力方式の両方で使われます（選択式 1〜10）。<br />
+        ・回数入力を選ぶと、記録画面ではセット数ぶんの回数入力欄が表示され、ここで設定した「ノルマ回数」が薄く表示されます。
       </p>
 
       {Block("upper", "上半身")}
