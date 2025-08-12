@@ -11,19 +11,21 @@ import Link from "next/link";
 import { loadDayRecord, saveDayRecord, loadJSON } from "@/lib/local-storage";
 import { defaultExercises } from "@/lib/exercises-default";
 
+/** types.ts を触らず、この画面だけで型を拡張して使う */
 type Category = "upper" | "lower" | "other";
 type InputMode = "check" | "count";
-
-type ExerciseItem = {
+type ExtendedExerciseItem = {
   id: string;
   name: string;
   category: Category;
   inputMode?: InputMode;
-  checkCount?: number;  // 設定タブの「セット数」
-  sets?: number;        // 旧フィールド互換
+  /** セット数（checkCount優先, なければsets, 既定3） */
+  checkCount?: number;
+  sets?: number;            // 旧フィールド互換
   enabled?: boolean;
   order?: number;
-  repTarget?: number;   // 回数入力モードの「ノルマ回数」
+  /** 回数入力モード時のノルマ回数 */
+  repTarget?: number;
 };
 
 type DayRecord = {
@@ -31,16 +33,18 @@ type DayRecord = {
   notesUpper: string;
   notesLower: string;
   notesOther?: string;
+  /** チェック入力: 種目ID => セットごとの完了フラグ */
   sets: Record<string, boolean[]>;
-  counts?: Record<string, number[]>; // セットごとの回数
+  /** 回数入力: 種目ID => セットごとの回数 */
+  counts?: Record<string, number[]>;
 };
 
 type ItemUI = {
   id: string;
   name: string;
   mode: InputMode;
-  checks: number;     // セット数
-  target?: number;    // ノルマ回数（count時）/ セット数（check時表示用）
+  checks: number;      // セット数
+  target?: number;     // ノルマ回数（count時）/ 表示用（check時はセット数）
 };
 
 type GroupUI = {
@@ -53,12 +57,12 @@ type GroupUI = {
 const SETTINGS_KEY = "settings-v1";
 const today = new Date().toISOString().split("T")[0];
 
-// 既存 counts が number の場合に配列に正規化
+/** 既存 counts が number の場合に配列に正規化 */
 function toCountsArray(obj: unknown): Record<string, number[]> {
   if (!obj || typeof obj !== "object") return {};
   const out: Record<string, number[]> = {};
   for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
-    if (Array.isArray(v)) out[k] = v.map(n => Math.max(0, Math.floor(Number(n) || 0)));
+    if (Array.isArray(v)) out[k] = v.map((n) => Math.max(0, Math.floor(Number(n) || 0)));
     else if (typeof v === "number") out[k] = [Math.max(0, Math.floor(v))];
   }
   return out;
@@ -81,28 +85,31 @@ export default function RecordTab() {
   };
 
   useEffect(() => {
-    // 当日記録読み込み（counts を配列に正規化）
+    // 1) 当日記録を読み込み（counts は配列に正規化）
     const rec = loadDayRecord(today) as Partial<DayRecord> | null;
     if (rec) {
-      setDayRecord(prev => ({
+      setDayRecord((prev) => ({
         ...prev,
         ...rec,
         counts: { ...(prev.counts ?? {}), ...toCountsArray((rec as any).counts) },
       }));
     }
-    // 設定（なければデフォルト）からUIを構築
-    type Settings = { items: ExerciseItem[] };
+
+    // 2) 設定 or デフォルトから UI 構築
+    type Settings = { items: ExtendedExerciseItem[] };
     const saved = loadJSON<Settings>(SETTINGS_KEY);
-    const items = saved?.items?.length ? saved.items : (defaultExercises as ExerciseItem[]);
+    const items = saved?.items?.length
+      ? saved.items
+      : (defaultExercises as ExtendedExerciseItem[]);
     setGroups(buildGroups(items));
   }, []);
 
-  function buildGroups(items: ExerciseItem[]): GroupUI[] {
+  function buildGroups(items: ExtendedExerciseItem[]): GroupUI[] {
     const norm = (x?: number) => (Number.isFinite(x) && Number(x) ? Number(x) : 0);
 
     const list: ItemUI[] = items
-      .filter(x => x.enabled !== false)
-      .map(x => {
+      .filter((x) => x.enabled !== false)
+      .map((x) => {
         const mode: InputMode = x.inputMode ?? "check";
         const checks = Math.max(1, norm(x.checkCount) || norm(x.sets) || 3);
         const target = mode === "count"
@@ -112,11 +119,12 @@ export default function RecordTab() {
       });
 
     const sortByOrder = (a: ItemUI, b: ItemUI) => {
-      const oa = items.find(i => i.id === a.id)?.order ?? 0;
-      const ob = items.find(i => i.id === b.id)?.order ?? 0;
+      const oa = items.find((i) => i.id === a.id)?.order ?? 0;
+      const ob = items.find((i) => i.id === b.id)?.order ?? 0;
       return oa - ob;
     };
-    const pick = (cat: Category) => list.filter(i => items.find(x => x.id === i.id)?.category === cat).sort(sortByOrder);
+    const pick = (cat: Category) =>
+      list.filter((i) => items.find((x) => x.id === i.id)?.category === cat).sort(sortByOrder);
 
     return [
       { cat: "upper", label: "上半身", noteField: "notesUpper", items: pick("upper") },
@@ -165,7 +173,8 @@ export default function RecordTab() {
 
   function CategoryBlock({ group }: { group: GroupUI }) {
     const g = group;
-    const maxChecks = Math.max(0, ...g.items.map(x => x.checks)); // 行レイアウト揃え
+    // レイアウト合わせのため、カテゴリ内最大セット数
+    const maxChecks = Math.max(0, ...g.items.map((x) => x.checks));
 
     return (
       <Card className="p-4 space-y-3">
@@ -175,7 +184,9 @@ export default function RecordTab() {
           {g.items.map((ex) => {
             const note =
               ex.mode === "count"
-                ? (ex.target ? `ノルマ ${ex.target}回` : "回数入力")
+                ? ex.target
+                  ? `ノルマ ${ex.target}回`
+                  : "回数入力"
                 : `ノルマ ${ex.checks}セット`;
 
             return (
@@ -186,13 +197,14 @@ export default function RecordTab() {
                 </div>
 
                 {ex.mode === "count" ? (
-                  // 回数入力モード：セット数ぶんの数値欄 + placeholderにノルマ反映
+                  // 回数入力：セット数ぶんの入力欄 + placeholder にノルマ回数
                   <div
                     className="grid gap-2"
                     style={{ gridTemplateColumns: `repeat(${Math.max(ex.checks, 1)}, 4.5rem)` }}
                   >
                     {Array.from({ length: Math.max(ex.checks, 1) }).map((_, idx) => {
-                      const value = (dayRecord.counts?.[ex.id]?.[idx] ?? 0) | 0;
+                      const raw = dayRecord.counts?.[ex.id]?.[idx];
+                      const value: number | string = typeof raw === "number" ? raw : "";
                       return (
                         <div key={idx} className="flex items-center gap-1">
                           <Input
@@ -211,7 +223,7 @@ export default function RecordTab() {
                     })}
                   </div>
                 ) : (
-                  // チェックモード：セット数ぶんのチェック
+                  // チェック入力：セット数ぶんのチェック
                   <div
                     className="grid gap-2"
                     style={{ gridTemplateColumns: `repeat(${Math.max(maxChecks, 1)}, 2.75rem)` }}
@@ -254,7 +266,7 @@ export default function RecordTab() {
     );
   }
 
-  const allEmpty = groups.every(g => g.items.length === 0);
+  const allEmpty = groups.every((g) => g.items.length === 0);
 
   return (
     <div className="space-y-4">
@@ -262,7 +274,11 @@ export default function RecordTab() {
         <Card className="p-4">
           <div className="text-sm">
             種目データが見つかりませんでした。初期データで表示しています。<br />
-            種目の追加・編集は <Link className="underline" href="/tabs/settings">設定</Link> から行えます。
+            種目の追加・編集は{" "}
+            <Link className="underline" href="/tabs/settings">
+              設定
+            </Link>{" "}
+            から行えます。
           </div>
         </Card>
       )}

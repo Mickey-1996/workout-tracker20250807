@@ -1,3 +1,4 @@
+// src/tabs/SettingsTab.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -18,23 +19,36 @@ import { defaultExercises } from "@/lib/exercises-default";
 
 const SETTINGS_KEY = "settings-v1";
 
-type Settings = { items: ExerciseItem[] };
+/** types.ts を触らず UI 側だけで拡張して使う */
+type ExtendedExerciseItem = ExerciseItem & {
+  /** 回数入力モード時のノルマ回数（任意） */
+  repTarget?: number;
+  /** 既存データ互換: セット数（チェック数） */
+  checkCount?: number;
+  /** 既存データ互換: セット数（旧フィールド） */
+  sets?: number;
+  /** UI用: 並び順/有効 */
+  order?: number;
+  enabled?: boolean;
+};
 
-function newItem(cat: Category): ExerciseItem {
+type Settings = { items: ExtendedExerciseItem[] };
+
+function newItem(cat: Category): ExtendedExerciseItem {
   return {
     id: crypto.randomUUID(),
     name: "",
     category: cat,
-    sets: 3,
     inputMode: "check",
-    checkCount: 3, // UI上は「セット数」
+    checkCount: 3, // UIでは「セット数」として扱う
+    sets: 3,       // 旧フィールド互換
     enabled: true,
     order: 0,
   };
 }
 
 export default function SettingsTab() {
-  const [items, setItems] = useState<ExerciseItem[]>([]);
+  const [items, setItems] = useState<ExtendedExerciseItem[]>([]);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -42,7 +56,8 @@ export default function SettingsTab() {
     if (saved?.items?.length) {
       setItems(saved.items);
     } else {
-      setItems(defaultExercises);
+      // defaultExercises が ExerciseItem[] の場合も Extended に流用可
+      setItems(defaultExercises as ExtendedExerciseItem[]);
     }
     setReady(true);
   }, []);
@@ -53,7 +68,8 @@ export default function SettingsTab() {
   }, [items, ready]);
 
   const byCat = useMemo(() => {
-    const sortByOrder = (a: ExerciseItem, b: ExerciseItem) => a.order - b.order;
+    const sortByOrder = (a: ExtendedExerciseItem, b: ExtendedExerciseItem) =>
+      (a.order ?? 0) - (b.order ?? 0);
     return {
       upper: items.filter((x) => x.category === "upper").sort(sortByOrder),
       lower: items.filter((x) => x.category === "lower").sort(sortByOrder),
@@ -61,13 +77,13 @@ export default function SettingsTab() {
     };
   }, [items]);
 
-  const update = (id: string, patch: Partial<ExerciseItem>) =>
+  const update = (id: string, patch: Partial<ExtendedExerciseItem>) =>
     setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
 
   const add = (cat: Category) =>
     setItems((prev) => {
       const maxOrder =
-        prev.filter((x) => x.category === cat).reduce((m, x) => Math.max(m, x.order), 0) || 0;
+        prev.filter((x) => x.category === cat).reduce((m, x) => Math.max(m, x.order ?? 0), 0) || 0;
       const item = newItem(cat);
       item.order = maxOrder + 1;
       return [...prev, item];
@@ -81,6 +97,7 @@ export default function SettingsTab() {
       const idx = arr.findIndex((x) => x.id === id);
       if (idx < 0) return prev;
       const cat = arr[idx].category;
+
       const sameCatIdx = arr
         .map((x, i) => ({ x, i }))
         .filter(({ x }) => x.category === cat)
@@ -93,8 +110,8 @@ export default function SettingsTab() {
       const j = sameCatIdx[nextPos];
       const a = arr[idx];
       const b = arr[j];
-      const tmp = a.order;
-      a.order = b.order;
+      const tmp = a.order ?? 0;
+      a.order = b.order ?? 0;
       b.order = tmp;
       return arr.slice();
     });
@@ -119,7 +136,7 @@ export default function SettingsTab() {
               {/* 記録対象 */}
               <label className="flex items-center gap-2 sm:col-span-2">
                 <Checkbox
-                  checked={it.enabled}
+                  checked={it.enabled !== false}
                   onCheckedChange={(v) => update(it.id, { enabled: Boolean(v) })}
                 />
                 <span className="text-sm">記録対象</span>
@@ -137,7 +154,7 @@ export default function SettingsTab() {
               {/* 入力方式 */}
               <div className="sm:col-span-3">
                 <Select
-                  value={it.inputMode}
+                  value={it.inputMode ?? "check"}
                   onValueChange={(v) => update(it.id, { inputMode: v as InputMode })}
                 >
                   <SelectTrigger>
@@ -155,8 +172,10 @@ export default function SettingsTab() {
                 <span className="text-sm opacity-80">セット数</span>
                 <select
                   className="h-10 rounded-md border px-2 text-sm"
-                  value={it.checkCount ?? 3}
-                  onChange={(e) => update(it.id, { checkCount: Number(e.target.value) })}
+                  value={it.checkCount ?? it.sets ?? 3}
+                  onChange={(e) =>
+                    update(it.id, { checkCount: Number(e.target.value), sets: Number(e.target.value) })
+                  }
                 >
                   {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
                     <option key={n} value={n}>
@@ -166,8 +185,8 @@ export default function SettingsTab() {
                 </select>
               </div>
 
-              {/* ノルマ回数（countのときだけ表示） */}
-              {it.inputMode === "count" && (
+              {/* ノルマ回数（count のときだけ表示） */}
+              { (it.inputMode ?? "check") === "count" && (
                 <div className="flex items-center gap-2 sm:col-span-1">
                   <span className="text-sm opacity-80">ノルマ回数</span>
                   <Input
@@ -180,7 +199,10 @@ export default function SettingsTab() {
                     value={it.repTarget ?? ""}
                     onChange={(e) =>
                       update(it.id, {
-                        repTarget: e.target.value === "" ? undefined : Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                        repTarget:
+                          e.target.value === ""
+                            ? undefined
+                            : Math.max(0, Math.floor(Number(e.target.value) || 0)),
                       })
                     }
                     placeholder="例: 10"
@@ -212,7 +234,7 @@ export default function SettingsTab() {
       <h2 className="text-xl font-bold">設定</h2>
       <p className="text-sm opacity-80">
         ・「セット数」はチェック方式と回数入力方式の両方で使われます（選択式 1〜10）。<br />
-        ・回数入力を選ぶと、記録画面ではセット数ぶんの回数入力欄が表示され、ここで設定した「ノルマ回数」が薄く表示されます。
+        ・回数入力を選ぶと「ノルマ回数」を設定でき、記録画面で薄表示/プレースホルダに反映されます。
       </p>
 
       {Block("upper", "上半身")}
