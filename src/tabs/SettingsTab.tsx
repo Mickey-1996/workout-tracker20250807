@@ -109,10 +109,10 @@ export default function SettingsTab() {
                 placeholder="種目名"
               />
               <Select
-                className="sm:col-span-3"
-                value={it.inputMode}
-                onValueChange={(v) => updateItem(it.id, { inputMode: v as InputMode })}
-              >
+               containerClassName="sm:col-span-3"
+               value={it.inputMode}
+               onValueChange={(v) => updateItem(it.id, { inputMode: v as InputMode })}
+              />
                 {modes.map((m) => (
                   <option key={m.value} value={m.value}>
                     {m.label}
