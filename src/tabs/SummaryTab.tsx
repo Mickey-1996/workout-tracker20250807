@@ -5,11 +5,14 @@ import { useEffect, useMemo, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { Checkbox } from "@/components/ui/Checkbox";
+import { DayPicker } from "react-day-picker";
 
+// 設定/記録の読み書き
 import { loadDayRecord, loadJSON } from "@/lib/local-storage";
 import { defaultExercises } from "@/lib/exercises-default";
 
-// この画面だけで使う軽量型（types.tsは不変更）
+/* ===================== 画面内限定の軽量型（types.tsは不変更） ===================== */
 type Category = "upper" | "lower" | "other";
 type InputMode = "check" | "count";
 
@@ -18,10 +21,11 @@ type ExtendedExerciseItem = {
   name: string;
   category: Category;
   inputMode?: InputMode;
-  checkCount?: number; // セット数（旧: sets 互換あり）
+  checkCount?: number;   // セット数（旧: sets 互換）
   sets?: number;
   enabled?: boolean;
   order?: number;
+  repTarget?: number;    // 回数入力時のノルマ
 };
 
 type Settings = { items: ExtendedExerciseItem[] };
@@ -30,23 +34,21 @@ type DayRecord = {
   date: string;
   // チェック入力: 種目ID => セットごとの完了フラグ
   sets: Record<string, boolean[]>;
-  // 回数入力: 種目ID => セットごとの回数
-  counts?: Record<string, number[] | number>; // 互換のため number も許容
+  // 回数入力: 種目ID => セットごとの回数（互換のため number も許容）
+  counts?: Record<string, number[] | number>;
+  // 備考
+  notesUpper?: string;
+  notesLower?: string;
+  notesOther?: string;
 };
 
-type Row = {
-  id: string;
-  name: string;
-  category: Category;
-  mode: InputMode;
-  total: number;        // count: 回数合計 / check: 完了セット合計
-  unit: "回" | "セット";
-};
-
-// --------- 日付ユーティリティ ---------
-const tz = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()); // ローカル日付固定
+/* ===================== 日付ユーティリティ ===================== */
+const tz = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()); // ローカル日付に丸め
 const toStr = (d: Date) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(
+    2,
+    "0"
+  )}`;
 const addDays = (d: Date, n: number) => tz(new Date(d.getFullYear(), d.getMonth(), d.getDate() + n));
 const enumerateDates = (from: Date, to: Date) => {
   const out: string[] = [];
@@ -59,9 +61,10 @@ const startOfWeekMon = (d: Date) => {
   return addDays(d, diff);
 };
 const startOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1);
+const endOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
 const startOfYear = (d: Date) => new Date(d.getFullYear(), 0, 1);
 
-// 既存データ互換：counts が number の場合は配列化
+/* ===================== 互換ヘルパ ===================== */
 function normalizeCounts(counts: DayRecord["counts"]): Record<string, number[]> {
   if (!counts || typeof counts !== "object") return {};
   const out: Record<string, number[]> = {};
@@ -71,22 +74,66 @@ function normalizeCounts(counts: DayRecord["counts"]): Record<string, number[]> 
   }
   return out;
 }
+function hasContent(rec: DayRecord | null): boolean {
+  if (!rec) return false;
+  if (rec.notesUpper || rec.notesLower || rec.notesOther) return true;
+  for (const arr of Object.values(rec.sets || {})) if (arr?.some(Boolean)) return true;
+  const counts = normalizeCounts(rec.counts);
+  for (const arr of Object.values(counts)) if (arr?.some((n) => (n ?? 0) > 0)) return true;
+  return false;
+}
+
+/* ===================== 種目別集計テーブルの行型 ===================== */
+type Row = {
+  id: string;
+  name: string;
+  category: Category;
+  mode: InputMode;
+  total: number;        // count: 回数合計 / check: 完了セット合計
+  unit: "回" | "セット";
+};
 
 export default function SummaryTab() {
   const today = useMemo(() => tz(new Date()), []);
   const [from, setFrom] = useState<Date>(startOfMonth(today));
   const [to, setTo] = useState<Date>(today);
 
-  // 設定（なければデフォルト）
+  // ===== 設定（なければデフォルト） =====
   const [items, setItems] = useState<ExtendedExerciseItem[]>([]);
   useEffect(() => {
     const saved = loadJSON<Settings>("settings-v1");
     const arr = saved?.items?.length ? saved.items : (defaultExercises as ExtendedExerciseItem[]);
-    // 非表示は集計対象から除外
     setItems(arr.filter((x) => x.enabled !== false));
   }, []);
 
-  // 種目別の合計だけを算出（カテゴリ合計は表示しない）
+  // ===== カレンダー（月） =====
+  const [month, setMonth] = useState<Date>(today);           // 表示中の月
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
+  const [daysWithRecord, setDaysWithRecord] = useState<Date[]>([]);
+  // 月が変わる / 初回 に、その月で記録がある日を調べる
+  useEffect(() => {
+    const mStart = startOfMonth(month);
+    const mEnd = endOfMonth(month);
+    const list: Date[] = [];
+    for (let d = tz(mStart); d <= mEnd; d = addDays(d, 1)) {
+      const rec = loadDayRecord(toStr(d)) as DayRecord | null;
+      if (hasContent(rec)) list.push(new Date(d));
+    }
+    setDaysWithRecord(list);
+  }, [month]);
+
+  // その日のスナップショット
+  const [snapshot, setSnapshot] = useState<DayRecord | null>(null);
+  useEffect(() => {
+    if (!selectedDate) {
+      setSnapshot(null);
+      return;
+    }
+    const rec = loadDayRecord(toStr(selectedDate)) as DayRecord | null;
+    setSnapshot(rec && hasContent(rec) ? rec : null);
+  }, [selectedDate]);
+
+  // ===== 種目別の合計（カテゴリ合計は表示しない） =====
   const rows: Row[] = useMemo(() => {
     if (!items.length) return [];
 
@@ -158,8 +205,117 @@ export default function SummaryTab() {
     }
   };
 
+  /* ===================== UI ===================== */
   return (
     <div className="space-y-4">
+      {/* カレンダー & 日別スナップショット */}
+      <div className="grid gap-4 md:grid-cols-2">
+        {/* カレンダー */}
+        <Card className="p-4">
+          <h2 className="text-base font-bold mb-3">日別記録カレンダー</h2>
+          <div className="rounded-md border p-2">
+            <DayPicker
+              mode="single"
+              month={month}
+              onMonthChange={setMonth}
+              selected={selectedDate}
+              onSelect={setSelectedDate}
+              showOutsideDays
+              // 記録がある日を強調
+              modifiers={{ recorded: daysWithRecord }}
+              modifiersClassNames={{
+                recorded: "bg-emerald-100 rounded-full font-semibold",
+              }}
+              className="text-sm"
+            />
+          </div>
+          <p className="mt-2 text-xs opacity-70">
+            緑のマークがある日には記録があります。日付をタップすると、その日の記録が右に表示されます。
+          </p>
+        </Card>
+
+        {/* 日別スナップショット */}
+        <Card className="p-4">
+          <h2 className="text-base font-bold mb-3">
+            {selectedDate ? `${toStr(selectedDate)} の記録` : "日付を選択してください"}
+          </h2>
+
+          {!selectedDate && <div className="text-sm opacity-70">カレンダーから日付を選ぶと内容が表示されます。</div>}
+
+          {selectedDate && !snapshot && (
+            <div className="text-sm opacity-70">この日には保存された記録がありません。</div>
+          )}
+
+          {selectedDate && snapshot && (
+            <div className="space-y-4">
+              {(["upper", "lower", "other"] as Category[]).map((cat) => {
+                const catItems = items.filter((x) => x.category === cat);
+                if (catItems.length === 0) return null;
+
+                return (
+                  <div key={cat}>
+                    <div className="font-semibold mb-1">
+                      {cat === "upper" ? "上半身" : cat === "lower" ? "下半身" : "その他"}
+                    </div>
+                    <div className="space-y-2">
+                      {catItems.map((it) => {
+                        const mode: InputMode = it.inputMode ?? "check";
+                        const checks = Math.max(1, it.checkCount ?? it.sets ?? 3);
+
+                        if (mode === "count") {
+                          const counts = normalizeCounts(snapshot.counts)[it.id] || [];
+                          const shown = Array.from({ length: checks }).map((_, i) => counts[i] ?? 0);
+                          const sum = shown.reduce((s, n) => s + (Number.isFinite(n) ? n : 0), 0);
+                          return (
+                            <div key={it.id} className="text-sm">
+                              <div className="font-medium">{it.name}</div>
+                              <div className="mt-1 flex flex-wrap gap-2">
+                                {shown.map((n, i) => (
+                                  <div key={i} className="flex items-center gap-1">
+                                    <span className="text-xs opacity-70">S{i + 1}</span>
+                                    <span className="rounded border px-2 py-1">{n} 回</span>
+                                  </div>
+                                ))}
+                                <span className="ml-auto text-xs opacity-70">合計 {sum} 回</span>
+                              </div>
+                            </div>
+                          );
+                        } else {
+                          const flags = (snapshot.sets?.[it.id] || []).slice(0, checks);
+                          const done = flags.filter(Boolean).length;
+                          return (
+                            <div key={it.id} className="text-sm">
+                              <div className="font-medium">{it.name}</div>
+                              <div className="mt-1 flex flex-wrap gap-2">
+                                {Array.from({ length: checks }).map((_, i) => (
+                                  <Checkbox key={i} checked={Boolean(flags[i])} disabled className="h-5 w-5" />
+                                ))}
+                                <span className="ml-auto text-xs opacity-70">
+                                  完了 {done}/{checks} セット
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        }
+                      })}
+                    </div>
+
+                    {/* 備考 */}
+                    {((cat === "upper" && snapshot.notesUpper) ||
+                      (cat === "lower" && snapshot.notesLower) ||
+                      (cat === "other" && snapshot.notesOther)) && (
+                      <div className="mt-2 text-xs opacity-80 whitespace-pre-wrap">
+                        {cat === "upper" ? snapshot.notesUpper : cat === "lower" ? snapshot.notesLower : snapshot.notesOther}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+      </div>
+
       {/* 期間コントロール */}
       <Card className="p-4 space-y-3">
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
