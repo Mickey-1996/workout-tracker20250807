@@ -1,19 +1,38 @@
-import { ExercisesState } from "./types";
+// src/lib/exercises-default.ts
+import type { ExerciseItem } from "./types";
 
-export const DEFAULT_EXERCISES: ExercisesState = {
-  version: 1,
-  items: [
-    // 上半身（初期は全部checkbox 3個）
-    { id: "u-1", name: "フル懸垂 できる限り", category: "upper", inputMode: "checkbox", checkboxCount: 3, active: true },
-    { id: "u-2", name: "フル懸垂 5回×3セット", category: "upper", inputMode: "checkbox", checkboxCount: 3, active: true },
-    { id: "u-3", name: "ネガティブ懸垂 5回×3セット", category: "upper", inputMode: "checkbox", checkboxCount: 3, active: true },
-    { id: "u-4", name: "ダンベルベントロウ 15回×3セット", category: "upper", inputMode: "checkbox", checkboxCount: 3, active: true },
-    { id: "u-5", name: "ダンベルプルオーバー 10回×3セット", category: "upper", inputMode: "checkbox", checkboxCount: 3, active: true },
-    { id: "u-6", name: "ダンベルフライ 15回×3セット", category: "upper", inputMode: "checkbox", checkboxCount: 3, active: true },
-    { id: "u-7", name: "腕立て伏せ 15回×3セット", category: "upper", inputMode: "checkbox", checkboxCount: 3, active: true },
-    // 下半身
-    { id: "l-1", name: "バックランジ 20回×3セット", category: "lower", inputMode: "checkbox", checkboxCount: 3, active: true },
-    { id: "l-2", name: "ワイドスクワット 15回×3セット", category: "lower", inputMode: "checkbox", checkboxCount: 3, active: true },
-    // その他は空スタート
-  ],
-};
+function make(
+  category: ExerciseItem["category"],
+  name: string,
+  order: number
+): ExerciseItem {
+  return {
+    id: crypto.randomUUID(),
+    name,
+    category,
+    sets: 3,          // 初期3セット
+    inputMode: "check",
+    checkCount: 3,    // 初期3チェック
+    enabled: true,
+    order,
+  };
+}
+
+export const defaultExercises: ExerciseItem[] = [
+  // 上半身
+  make("upper", "フル懸垂 できる限り", 1),
+  make("upper", "フル懸垂 5回×3セット", 2),
+  make("upper", "ネガティブ懸垂 5回×3セット", 3),
+  make("upper", "ダンベルベントロウ 15回×3セット", 4),
+  make("upper", "ダンベルプルオーバー 10回×3セット", 5),
+  make("upper", "ダンベルフライ 15回×3セット", 6),
+  make("upper", "腕立て伏せ 15回×3セット", 7),
+
+  // 下半身
+  make("lower", "バックランジ 20回×3セット", 1),
+  make("lower", "ワイドスクワット 15回×3セット", 2),
+
+  // その他（初期は空でもOKだがダミー1件）
+  // 使わないなら削除してもOK
+  // make("other", "（未定）", 1),
+];
