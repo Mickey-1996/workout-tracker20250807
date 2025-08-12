@@ -163,15 +163,9 @@ export default function SettingsTab() {
               </div>
 
               <div className="flex gap-2 sm:col-span-1 sm:justify-end">
-                <Button variant="secondary" onClick={() => move(it.id, -1)}>
-                  ↑
-                </Button>
-                <Button variant="secondary" onClick={() => move(it.id, 1)}>
-                  ↓
-                </Button>
-                <Button variant="destructive" onClick={() => remove(it.id)}>
-                  削除
-                </Button>
+                <Button onClick={() => move(it.id, -1)}>↑</Button>
+                <Button onClick={() => move(it.id, 1)}>↓</Button>
+                <Button onClick={() => remove(it.id)}>削除</Button>
               </div>
             </div>
           ))}

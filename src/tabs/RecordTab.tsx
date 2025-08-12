@@ -12,7 +12,19 @@ import {
   saveDayRecord,
 } from "@/lib/local-storage";
 
-import type { DayRecord, ExercisesState } from "@/lib/types";
+// --- ローカル型（@/lib/types に依存しない最小定義） ---
+type DayRecord = {
+  date: string;
+  notesUpper: string;
+  notesLower: string;
+  sets: Record<string, boolean[]>; // 種目ID => セットごとの完了フラグ
+};
+
+type ExercisesState = Record<
+  string,
+  { id: string; name: string; sets: number }[]
+>;
+// -------------------------------------------------------
 
 const today = new Date().toISOString().split("T")[0];
 
@@ -25,6 +37,7 @@ export default function RecordTab() {
     sets: {},
   });
 
+  // 初期データ読み込み
   useEffect(() => {
     const loadedExercises = loadExercises();
     if (loadedExercises) {
@@ -36,6 +49,7 @@ export default function RecordTab() {
     }
   }, []);
 
+  // セットチェック切り替え
   const toggleSet = (exerciseId: string, setIndex: number) => {
     const updatedSets = { ...dayRecord.sets };
     if (!updatedSets[exerciseId]) {
@@ -47,6 +61,7 @@ export default function RecordTab() {
     saveDayRecord(today, updatedRecord);
   };
 
+  // メモ変更
   const handleNotesChange = (field: "notesUpper" | "notesLower", value: string) => {
     const updatedRecord = { ...dayRecord, [field]: value };
     setDayRecord(updatedRecord);
