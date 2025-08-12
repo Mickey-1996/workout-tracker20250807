@@ -11,8 +11,8 @@ import { loadDayRecord, saveDayRecord, loadJSON } from "@/lib/local-storage";
 /* ========== 画面内限定の軽量型（他ファイルは変更不要） ========== */
 type DayRecord = {
   date: string;
-  notesUpper?: string;
-  notesLower?: string;
+  notesUpper: string; // 必須stringに統一
+  notesLower: string; // 必須stringに統一
   sets: Record<string, boolean[]>;
   counts?: Record<string, number[]>;
 };
@@ -82,12 +82,10 @@ export default function RecordTab() {
     setMeta(m);
   }, []);
 
-  /* 種目（従来の loadExercises 出力） */
+  /* 種目（settings から合成） */
   const [exercises, setExercises] = useState<ExercisesState | null>(null);
   useEffect(() => {
-    // 既存ラッパーが無い環境もあるため、settings から合成（フォールバック）
     if (Object.keys(meta).length) {
-      // meta からカテゴリ別配列を再構成（名前は settings から取れない場合もあるので既存保存を尊重）
       const settings = loadJSON<Settings>("settings-v1");
       const items = settings?.items?.filter((x) => x.enabled !== false) ?? [];
       const grouped: ExercisesState = { upper: [], lower: [], other: [] } as any;
@@ -100,12 +98,10 @@ export default function RecordTab() {
         });
       }
       setExercises(grouped);
-      return;
     }
-    // meta 未構築の一瞬だけ、空のまま
   }, [meta]);
 
-  /* 当日レコード */
+  /* 当日レコード（必ず string を入れる） */
   const [dayRecord, setDayRecord] = useState<DayRecord>({
     date: todayStr,
     notesUpper: "",
@@ -115,7 +111,7 @@ export default function RecordTab() {
   });
 
   useEffect(() => {
-    const loaded = loadDayRecord(todayStr) as DayRecord | null;
+    const loaded = loadDayRecord(todayStr) as Partial<DayRecord> | null;
     if (loaded) {
       setDayRecord({
         date: todayStr,
@@ -128,6 +124,7 @@ export default function RecordTab() {
   }, []);
 
   const persist = (rec: DayRecord) => {
+    // rec は notesUpper/notesLower が必ず string
     setDayRecord(rec);
     saveDayRecord(todayStr, rec);
   };
@@ -169,7 +166,6 @@ export default function RecordTab() {
 
     const counts = { ...(dayRecord.counts || {}) };
     const arr = [...(counts[exerciseId] ?? [])];
-    // 配列長を埋める
     const needLen = Math.max(setIndex + 1, arr.length);
     for (let i = 0; i < needLen; i++) if (arr[i] == null) arr[i] = 0;
     arr[setIndex] = n;
@@ -181,9 +177,9 @@ export default function RecordTab() {
     if (n > 0) updateLastDone(exerciseId);
   };
 
-  /* メモ */
+  /* メモ（必ず string を保持） */
   const handleNotesChange = (field: "notesUpper" | "notesLower", value: string) => {
-    persist({ ...dayRecord, [field]: value });
+    persist({ ...dayRecord, [field]: value ?? "" });
   };
 
   /* 経過時間表示テキスト */
@@ -231,7 +227,6 @@ export default function RecordTab() {
                   {mode === "count"
                     ? Array.from({ length: setCount }).map((_, idx) => {
                         const cur = dayRecord.counts?.[ex.id]?.[idx] ?? "";
-                        // ノルマ（repTarget）はプレースホルダで淡く表示
                         const ph = m.repTarget ? String(m.repTarget) : "";
                         return (
                           <Input
@@ -267,7 +262,7 @@ export default function RecordTab() {
         <h3 className="text-base font-bold mb-2">上半身メモ</h3>
         <Textarea
           className="text-sm"
-          value={dayRecord.notesUpper ?? ""}
+          value={dayRecord.notesUpper}
           onChange={(e) => handleNotesChange("notesUpper", e.target.value)}
           placeholder="上半身トレーニングに関するメモ"
         />
@@ -277,7 +272,7 @@ export default function RecordTab() {
         <h3 className="text-base font-bold mb-2">下半身メモ</h3>
         <Textarea
           className="text-sm"
-          value={dayRecord.notesLower ?? ""}
+          value={dayRecord.notesLower}
           onChange={(e) => handleNotesChange("notesLower", e.target.value)}
           placeholder="下半身トレーニングに関するメモ"
         />
