@@ -243,8 +243,8 @@ export default function RecordTab() {
                     </div>
                   </div>
 
-                  {/* 2行目：入力行（回数は選択式・チェックは少し大きめ） */}
-                  <div className="mt-2 flex flex-wrap gap-2">
+                  {/* 2行目：入力行（どちらのモードも右寄せ） */}
+                  <div className="mt-2 flex flex-wrap gap-2 justify-end pr-2">
                     {mode === "count"
                       ? Array.from({ length: setCount }).map((_, idx) => {
                           const cur = dayRecord.counts?.[ex.id]?.[idx] ?? 0;
@@ -272,7 +272,7 @@ export default function RecordTab() {
                             key={idx}
                             checked={dayRecord.sets?.[ex.id]?.[idx] || false}
                             onCheckedChange={() => toggleSet(ex.id, idx)}
-                            className="h-7 w-7"
+                            className="h-8 w-8"
                           />
                         ))}
                   </div>
