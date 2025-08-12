@@ -28,7 +28,7 @@ function newItem(cat: Category): ExerciseItem {
     category: cat,
     sets: 3,
     inputMode: "check",
-    checkCount: 3, // ← UIでは「セット数」として扱う（count時も同じ）
+    checkCount: 3, // UI上は「セット数」
     enabled: true,
     order: 0,
   };
@@ -147,20 +147,24 @@ export default function SettingsTab() {
                 </Select>
               </div>
 
-              {/* ① 表示名を「セット数」に変更。② count時も常に設定できるように disabled を外す */}
+              {/* セット数：数値で直接入力できるように変更（count時も常に編集可） */}
               <div className="flex items-center gap-2 sm:col-span-2">
                 <span className="text-sm opacity-80">セット数</span>
-                <select
-                  className="h-10 rounded-md border px-2 text-sm"
+                <Input
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={20}
+                  step={1}
+                  className="w-24"
                   value={it.checkCount ?? 3}
-                  onChange={(e) => update(it.id, { checkCount: Number(e.target.value) })}
-                >
-                  {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
-                    <option key={n} value={n}>
-                      {n}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(e) => {
+                    const raw = Number(e.target.value);
+                    const n = Number.isFinite(raw) ? Math.floor(raw) : 1;
+                    const clamped = Math.min(20, Math.max(1, n));
+                    update(it.id, { checkCount: clamped });
+                  }}
+                />
               </div>
 
               <div className="flex gap-2 sm:col-span-1 sm:justify-end">
@@ -185,7 +189,7 @@ export default function SettingsTab() {
     <div className="space-y-6">
       <h2 className="text-xl font-bold">設定</h2>
       <p className="text-sm opacity-80">
-        ・「セット数」はチェック方式のチェック個数、回数入力方式の“セット数”の両方に使われます。<br />
+        ・「セット数」はチェック方式のチェック個数、回数入力方式の“セット数”の両方に使われます（1〜20）。<br />
         ・回数入力を選ぶと、記録画面ではセット数ぶんの回数入力欄が表示されます。
       </p>
 
