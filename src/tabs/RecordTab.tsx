@@ -2,9 +2,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Card } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Card } from "@/components/ui/Card";
+import { Textarea } from "@/components/ui/Textarea";
+import { Checkbox } from "@/components/ui/Checkbox";
 
 import {
   loadDayRecord,
@@ -25,7 +25,6 @@ export default function RecordTab() {
     sets: {},
   });
 
-  // 初期データ読み込み
   useEffect(() => {
     const loadedExercises = loadExercises();
     if (loadedExercises) {
@@ -37,7 +36,6 @@ export default function RecordTab() {
     }
   }, []);
 
-  // セットチェック切り替え
   const toggleSet = (exerciseId: string, setIndex: number) => {
     const updatedSets = { ...dayRecord.sets };
     if (!updatedSets[exerciseId]) {
@@ -49,7 +47,6 @@ export default function RecordTab() {
     saveDayRecord(today, updatedRecord);
   };
 
-  // メモ変更
   const handleNotesChange = (field: "notesUpper" | "notesLower", value: string) => {
     const updatedRecord = { ...dayRecord, [field]: value };
     setDayRecord(updatedRecord);
