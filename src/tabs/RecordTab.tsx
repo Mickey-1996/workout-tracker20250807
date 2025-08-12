@@ -1,17 +1,18 @@
-// src/tabs/RecordTab.tsx
+// 記録タブ：回数入力は選択式（0〜99）、チェックは最大5個表示。
+// 「ノルマ…」の小さな説明行は表示しない。「その他」空時の説明も非表示。
+
 "use client";
 
 import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Textarea } from "@/components/ui/Textarea";
 import { Checkbox } from "@/components/ui/Checkbox";
-import { Input } from "@/components/ui/Input";
 import Link from "next/link";
 
 import { loadDayRecord, saveDayRecord, loadJSON } from "@/lib/local-storage";
 import { defaultExercises } from "@/lib/exercises-default";
 
-/** types.ts を触らず、この画面だけで型を拡張して使う */
+/** この画面だけで使う軽量型 */
 type Category = "upper" | "lower" | "other";
 type InputMode = "check" | "count";
 type ExtendedExerciseItem = {
@@ -19,12 +20,10 @@ type ExtendedExerciseItem = {
   name: string;
   category: Category;
   inputMode?: InputMode;
-  /** セット数（checkCount優先, なければsets, 既定3） */
   checkCount?: number;
-  sets?: number;            // 旧フィールド互換
+  sets?: number;
   enabled?: boolean;
   order?: number;
-  /** 回数入力モード時のノルマ回数 */
   repTarget?: number;
 };
 
@@ -33,10 +32,8 @@ type DayRecord = {
   notesUpper: string;
   notesLower: string;
   notesOther?: string;
-  /** チェック入力: 種目ID => セットごとの完了フラグ */
-  sets: Record<string, boolean[]>;
-  /** 回数入力: 種目ID => セットごとの回数 */
-  counts?: Record<string, number[]>;
+  sets: Record<string, boolean[]>;         // チェック方式
+  counts?: Record<string, number[] | number>; // 回数方式（互換）
 };
 
 type ItemUI = {
@@ -44,7 +41,7 @@ type ItemUI = {
   name: string;
   mode: InputMode;
   checks: number;      // セット数
-  target?: number;     // ノルマ回数（count時のplaceholder用）
+  target?: number;     // ノルマ回数（count の placeholderには使わないが保持）
 };
 
 type GroupUI = {
@@ -57,11 +54,11 @@ type GroupUI = {
 const SETTINGS_KEY = "settings-v1";
 const today = new Date().toISOString().split("T")[0];
 
-/** 既存 counts が number の場合に配列に正規化 */
-function toCountsArray(obj: unknown): Record<string, number[]> {
-  if (!obj || typeof obj !== "object") return {};
+/** counts が number の場合を配列へ正規化 */
+function normalizeCounts(counts: DayRecord["counts"]): Record<string, number[]> {
+  if (!counts || typeof counts !== "object") return {};
   const out: Record<string, number[]> = {};
-  for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+  for (const [k, v] of Object.entries(counts)) {
     if (Array.isArray(v)) out[k] = v.map((n) => Math.max(0, Math.floor(Number(n) || 0)));
     else if (typeof v === "number") out[k] = [Math.max(0, Math.floor(v))];
   }
@@ -81,21 +78,21 @@ export default function RecordTab() {
   const [toast, setToast] = useState<string | null>(null);
   const ping = () => {
     setToast("保存しました");
-    window.setTimeout(() => setToast(null), 1100);
+    window.setTimeout(() => setToast(null), 900);
   };
 
   useEffect(() => {
-    // 1) 当日記録を読み込み（counts は配列に正規化）
-    const rec = loadDayRecord(today) as Partial<DayRecord> | null;
+    // 当日記録の読み込み
+    const rec = loadDayRecord(today) as DayRecord | null;
     if (rec) {
       setDayRecord((prev) => ({
         ...prev,
         ...rec,
-        counts: { ...(prev.counts ?? {}), ...toCountsArray((rec as any).counts) },
+        counts: { ...(prev.counts ?? {}), ...normalizeCounts(rec.counts) },
       }));
     }
 
-    // 2) 設定 or デフォルトから UI 構築
+    // 設定 or デフォルトから UI 構築
     type Settings = { items: ExtendedExerciseItem[] };
     const saved = loadJSON<Settings>(SETTINGS_KEY);
     const items = saved?.items?.length
@@ -114,7 +111,7 @@ export default function RecordTab() {
         const checks = Math.max(1, norm(x.checkCount) || norm(x.sets) || 3);
         const target = mode === "count"
           ? (Number.isFinite(x.repTarget) ? Number(x.repTarget) : undefined)
-          : undefined; // 小さな説明は不要のためここでは使わない（countのplaceholder用に保持）
+          : undefined;
         return { id: x.id, name: x.name, mode, checks, target };
       });
 
@@ -133,15 +130,13 @@ export default function RecordTab() {
     ];
   }
 
-  // 回数入力：特定セットの値を更新
+  // 回数入力：選択値を保存
   const setCountAt = (exerciseId: string, setIndex: number, val: number) => {
-    const counts = { ...(dayRecord.counts ?? {}) };
+    const counts = normalizeCounts(dayRecord.counts);
     const arr = (counts[exerciseId] ?? []).slice();
-    const v = Math.max(0, Math.floor(val || 0));
     for (let i = arr.length; i <= setIndex; i++) arr[i] = 0;
-    arr[setIndex] = v;
-    counts[exerciseId] = arr;
-    const updated: DayRecord = { ...dayRecord, counts };
+    arr[setIndex] = Math.max(0, Math.floor(val || 0));
+    const updated: DayRecord = { ...dayRecord, counts: { ...counts, [exerciseId]: arr } };
     setDayRecord(updated);
     saveDayRecord(today, updated);
     ping();
@@ -172,35 +167,33 @@ export default function RecordTab() {
   if (!groups) return <div className="text-sm text-muted-foreground">読み込み中…</div>;
 
   function ExerciseRow({ ex }: { ex: ItemUI }) {
-    // 表示するセット数：check は最大5、count は設定どおり
-    const displayChecks = ex.mode === "check" ? Math.min(ex.checks, 5) : Math.max(ex.checks, 1);
+    // チェックは最大5個まで表示（UI崩れ防止）
+    const checksToShow = ex.mode === "check" ? Math.min(ex.checks, 5) : Math.max(ex.checks, 1);
 
     return (
       <div className="py-3">
-        {/* 1行目：種目名のみ（小さなノルマ表記は削除） */}
+        {/* 1行目：種目名のみ（ノルマ小表示は削除済み） */}
         <div className="font-medium leading-tight">{ex.name}</div>
 
-        {/* 2行目：入力UI（チェック or 回数） */}
+        {/* 2行目：入力UI（折返し可能） */}
         {ex.mode === "count" ? (
-          <div
-            className="mt-2 grid gap-2"
-            style={{ gridTemplateColumns: `repeat(${displayChecks}, minmax(3.75rem, 1fr))` }}
-          >
-            {Array.from({ length: displayChecks }).map((_, idx) => {
-              const raw = dayRecord.counts?.[ex.id]?.[idx];
-              const value: number | string = typeof raw === "number" ? raw : "";
+          <div className="mt-2 flex flex-wrap gap-2">
+            {Array.from({ length: checksToShow }).map((_, idx) => {
+              const current = normalizeCounts(dayRecord.counts)[ex.id]?.[idx] ?? 0;
               return (
                 <div key={idx} className="flex items-center gap-1">
-                  <Input
-                    type="number"
-                    inputMode="numeric"
-                    min={0}
-                    className="w-16 text-right"
-                    placeholder={ex.target ? String(ex.target) : "0"}
-                    value={value}
+                  <select
+                    className="h-10 rounded-md border px-2 text-sm w-16"
+                    value={current}
                     onChange={(e) => setCountAt(ex.id, idx, Number(e.target.value))}
                     aria-label={`${ex.name} セット${idx + 1} 回数`}
-                  />
+                  >
+                    {Array.from({ length: 100 }, (_, n) => n).map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
                   <span className="text-xs opacity-70">回</span>
                 </div>
               );
@@ -209,9 +202,9 @@ export default function RecordTab() {
         ) : (
           <div
             className="mt-2 grid gap-2"
-            style={{ gridTemplateColumns: `repeat(${displayChecks}, 2.75rem)` }}
+            style={{ gridTemplateColumns: `repeat(${checksToShow}, 2.75rem)` }}
           >
-            {Array.from({ length: displayChecks }).map((_, idx) => {
+            {Array.from({ length: checksToShow }).map((_, idx) => {
               const checked = dayRecord.sets[ex.id]?.[idx] || false;
               return (
                 <Checkbox
@@ -239,7 +232,11 @@ export default function RecordTab() {
           {g.items.map((ex) => (
             <ExerciseRow key={ex.id} ex={ex} />
           ))}
-          {g.items.length === 0 && <div className="py-2 text-sm opacity-60">（種目なし）</div>}
+
+          {/* 「その他」エリアは空でも説明行を出さない */}
+          {g.items.length === 0 && g.cat !== "other" && (
+            <div className="py-2 text-sm opacity-60">（種目なし）</div>
+          )}
         </div>
 
         {/* 備考欄 */}
@@ -284,3 +281,4 @@ export default function RecordTab() {
     </div>
   );
 }
+

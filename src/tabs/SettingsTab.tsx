@@ -1,4 +1,3 @@
-// src/tabs/SettingsTab.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -19,15 +18,11 @@ import { defaultExercises } from "@/lib/exercises-default";
 
 const SETTINGS_KEY = "settings-v1";
 
-/** types.ts を触らず UI 側だけで拡張して使う */
+/** types.ts は触らず UI 側だけで拡張 */
 type ExtendedExerciseItem = ExerciseItem & {
-  /** 回数入力モード時のノルマ回数（任意） */
-  repTarget?: number;
-  /** 既存データ互換: セット数（チェック数） */
-  checkCount?: number;
-  /** 既存データ互換: セット数（旧フィールド） */
+  repTarget?: number;   // 回数入力モード時のノルマ回数
+  checkCount?: number;  // セット数（旧: sets 互換あり）
   sets?: number;
-  /** UI用: 並び順/有効 */
   order?: number;
   enabled?: boolean;
 };
@@ -40,8 +35,8 @@ function newItem(cat: Category): ExtendedExerciseItem {
     name: "",
     category: cat,
     inputMode: "check",
-    checkCount: 3, // UIでは「セット数」として扱う
-    sets: 3,       // 旧フィールド互換
+    checkCount: 3,
+    sets: 3,
     enabled: true,
     order: 0,
   };
@@ -56,7 +51,6 @@ export default function SettingsTab() {
     if (saved?.items?.length) {
       setItems(saved.items);
     } else {
-      // defaultExercises が ExerciseItem[] の場合も Extended に流用可
       setItems(defaultExercises as ExtendedExerciseItem[]);
     }
     setReady(true);
@@ -128,7 +122,7 @@ export default function SettingsTab() {
         <div className="space-y-3">
           {list.length === 0 && <p className="text-sm opacity-70">（種目なし）</p>}
 
-          {list.map((it) => (
+          {list.map((it, idxInCat) => (
             <div
               key={it.id}
               className="grid grid-cols-1 gap-3 sm:grid-cols-12 sm:items-center rounded-md border p-3"
@@ -167,7 +161,7 @@ export default function SettingsTab() {
                 </Select>
               </div>
 
-              {/* セット数（選択式・countでも常に編集可） */}
+              {/* セット数（選択式 1〜5） */}
               <div className="flex items-center gap-2 sm:col-span-2">
                 <span className="text-sm opacity-80">セット数</span>
                 <select
@@ -177,7 +171,7 @@ export default function SettingsTab() {
                     update(it.id, { checkCount: Number(e.target.value), sets: Number(e.target.value) })
                   }
                 >
-                  {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+                  {[1, 2, 3, 4, 5].map((n) => (
                     <option key={n} value={n}>
                       {n}
                     </option>
@@ -185,33 +179,34 @@ export default function SettingsTab() {
                 </select>
               </div>
 
-              {/* ノルマ回数（count のときだけ表示） */}
-              { (it.inputMode ?? "check") === "count" && (
+              {/* ノルマ回数（回数入力のときだけ選択式：1〜99、未設定あり） */}
+              {(it.inputMode ?? "check") === "count" && (
                 <div className="flex items-center gap-2 sm:col-span-1">
                   <span className="text-sm opacity-80">ノルマ回数</span>
-                  <Input
-                    type="number"
-                    inputMode="numeric"
-                    min={0}
-                    max={500}
-                    step={1}
-                    className="w-24"
+                  <select
+                    className="h-10 rounded-md border px-2 text-sm w-24"
                     value={it.repTarget ?? ""}
                     onChange={(e) =>
                       update(it.id, {
-                        repTarget:
-                          e.target.value === ""
-                            ? undefined
-                            : Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                        repTarget: e.target.value === "" ? undefined : Number(e.target.value),
                       })
                     }
-                    placeholder="例: 10"
-                  />
+                  >
+                    <option value="">未設定</option>
+                    {Array.from({ length: 99 }, (_, i) => i + 1).map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               )}
 
-              {/* 並び替え/削除 */}
-              <div className="flex gap-2 sm:col-span-1 sm:justify-end">
+              {/* 順序表示 + 並び替え/削除 */}
+              <div className="flex gap-2 sm:col-span-12 sm:justify-end">
+                <span className="text-xs px-2 py-1 rounded border">
+                  順序 {it.order ?? idxInCat + 1}
+                </span>
                 <Button variant="secondary" onClick={() => move(it.id, -1)}>
                   ↑
                 </Button>
@@ -233,8 +228,8 @@ export default function SettingsTab() {
     <div className="space-y-6">
       <h2 className="text-xl font-bold">設定</h2>
       <p className="text-sm opacity-80">
-        ・「セット数」はチェック方式と回数入力方式の両方で使われます（選択式 1〜10）。<br />
-        ・回数入力を選ぶと「ノルマ回数」を設定でき、記録画面で薄表示/プレースホルダに反映されます。
+        ・「セット数」は選択式（1〜5）です。<br />
+        ・回数入力を選ぶと「ノルマ回数」を選択式（1〜99）で設定できます。未設定も可。
       </p>
 
       {Block("upper", "上半身")}
