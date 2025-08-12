@@ -18,6 +18,7 @@ import { loadJSON, saveJSON } from "@/lib/local-storage";
 import { defaultExercises } from "@/lib/exercises-default";
 
 const SETTINGS_KEY = "settings-v1";
+
 type Settings = { items: ExerciseItem[] };
 
 function newItem(cat: Category): ExerciseItem {
@@ -27,7 +28,7 @@ function newItem(cat: Category): ExerciseItem {
     category: cat,
     sets: 3,
     inputMode: "check",
-    checkCount: 3,
+    checkCount: 3, // ← UIでは「セット数」として扱う（count時も同じ）
     enabled: true,
     order: 0,
   };
@@ -53,7 +54,7 @@ export default function SettingsTab() {
   }, [items, ready]);
 
   const byCat = useMemo(() => {
-    const sortByOrder = (a: ExerciseItem, b: ExerciseItem) => (a.order ?? 0) - (b.order ?? 0);
+    const sortByOrder = (a: ExerciseItem, b: ExerciseItem) => a.order - b.order;
     return {
       upper: items.filter((x) => x.category === "upper").sort(sortByOrder),
       lower: items.filter((x) => x.category === "lower").sort(sortByOrder),
@@ -61,13 +62,13 @@ export default function SettingsTab() {
     };
   }, [items]);
 
-  const update = (id: string, patch: Partial<ExerciseItem> | Record<string, unknown>) =>
+  const update = (id: string, patch: Partial<ExerciseItem>) =>
     setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
 
   const add = (cat: Category) =>
     setItems((prev) => {
       const maxOrder =
-        prev.filter((x) => x.category === cat).reduce((m, x) => Math.max(m, x.order ?? 0), 0) || 0;
+        prev.filter((x) => x.category === cat).reduce((m, x) => Math.max(m, x.order), 0) || 0;
       const item = newItem(cat);
       item.order = maxOrder + 1;
       return [...prev, item];
@@ -93,8 +94,8 @@ export default function SettingsTab() {
       const j = sameCatIdx[nextPos];
       const a = arr[idx];
       const b = arr[j];
-      const tmp = a.order ?? 0;
-      a.order = b.order ?? 0;
+      const tmp = a.order;
+      a.order = b.order;
       b.order = tmp;
       return arr.slice();
     });
@@ -117,15 +118,15 @@ export default function SettingsTab() {
             >
               <label className="flex items-center gap-2 sm:col-span-2">
                 <Checkbox
-                  checked={it.enabled !== false}
+                  checked={it.enabled}
                   onCheckedChange={(v) => update(it.id, { enabled: Boolean(v) })}
                 />
                 <span className="text-sm">記録対象</span>
               </label>
 
-              <div className="sm:col-span-3">
+              <div className="sm:col-span-4">
                 <Input
-                  placeholder="種目名（例：フル懸垂 10回）"
+                  placeholder="種目名（例：フル懸垂 5回×3セット）"
                   value={it.name}
                   onChange={(e) => update(it.id, { name: e.target.value })}
                 />
@@ -133,7 +134,7 @@ export default function SettingsTab() {
 
               <div className="sm:col-span-3">
                 <Select
-                  value={(it.inputMode as InputMode) ?? "check"}
+                  value={it.inputMode}
                   onValueChange={(v) => update(it.id, { inputMode: v as InputMode })}
                 >
                   <SelectTrigger>
@@ -146,14 +147,13 @@ export default function SettingsTab() {
                 </Select>
               </div>
 
-              {/* チェック数（check のときだけ編集可能） */}
+              {/* ① 表示名を「セット数」に変更。② count時も常に設定できるように disabled を外す */}
               <div className="flex items-center gap-2 sm:col-span-2">
-                <span className="text-sm opacity-80">チェック数</span>
+                <span className="text-sm opacity-80">セット数</span>
                 <select
                   className="h-10 rounded-md border px-2 text-sm"
-                  value={it.checkCount ?? it.sets ?? 3}
-                  onChange={(e) => update(it.id, { checkCount: Number(e.target.value), sets: Number(e.target.value) })}
-                  disabled={it.inputMode !== "check"}
+                  value={it.checkCount ?? 3}
+                  onChange={(e) => update(it.id, { checkCount: Number(e.target.value) })}
                 >
                   {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
                     <option key={n} value={n}>
@@ -163,22 +163,7 @@ export default function SettingsTab() {
                 </select>
               </div>
 
-              {/* 回数目標（count のときだけ編集可能） */}
-              <div className="flex items-center gap-2 sm:col-span-2">
-                <span className="text-sm opacity-80">回数目標</span>
-                <Input
-                  type="number"
-                  inputMode="numeric"
-                  min={0}
-                  placeholder="例: 10"
-                  value={Number((it as any).repTarget ?? "")}
-                  onChange={(e) => update(it.id, { repTarget: Number(e.target.value) } as any)}
-                  disabled={it.inputMode !== "count"}
-                  className="w-24"
-                />
-              </div>
-
-              <div className="flex gap-2 sm:col-span-2 sm:justify-end">
+              <div className="flex gap-2 sm:col-span-1 sm:justify-end">
                 <Button variant="secondary" onClick={() => move(it.id, -1)}>
                   ↑
                 </Button>
@@ -200,8 +185,8 @@ export default function SettingsTab() {
     <div className="space-y-6">
       <h2 className="text-xl font-bold">設定</h2>
       <p className="text-sm opacity-80">
-        ・「入力方式」で <strong>チェック</strong>（セットごと）か <strong>回数入力</strong> を選択できます。<br />
-        ・チェック方式は「チェック数」でセット数を指定、回数入力は「回数目標」を任意指定できます。<br />
+        ・「セット数」はチェック方式のチェック個数、回数入力方式の“セット数”の両方に使われます。<br />
+        ・回数入力を選ぶと、記録画面ではセット数ぶんの回数入力欄が表示されます。
       </p>
 
       {Block("upper", "上半身")}
