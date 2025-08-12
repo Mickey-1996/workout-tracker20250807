@@ -44,7 +44,7 @@ type ItemUI = {
   name: string;
   mode: InputMode;
   checks: number;      // セット数
-  target?: number;     // ノルマ回数（count時）/ 表示用（check時はセット数）
+  target?: number;     // ノルマ回数（count時のplaceholder用）
 };
 
 type GroupUI = {
@@ -114,7 +114,7 @@ export default function RecordTab() {
         const checks = Math.max(1, norm(x.checkCount) || norm(x.sets) || 3);
         const target = mode === "count"
           ? (Number.isFinite(x.repTarget) ? Number(x.repTarget) : undefined)
-          : checks; // check時は表示用にセット数を使う
+          : undefined; // 小さな説明は不要のためここでは使わない（countのplaceholder用に保持）
         return { id: x.id, name: x.name, mode, checks, target };
       });
 
@@ -171,90 +171,79 @@ export default function RecordTab() {
 
   if (!groups) return <div className="text-sm text-muted-foreground">読み込み中…</div>;
 
-  function CategoryBlock({ group }: { group: GroupUI }) {
-    const g = group;
-    // レイアウト合わせのため、カテゴリ内最大セット数
-    const maxChecks = Math.max(0, ...g.items.map((x) => x.checks));
+  function ExerciseRow({ ex }: { ex: ItemUI }) {
+    // 表示するセット数：check は最大5、count は設定どおり
+    const displayChecks = ex.mode === "check" ? Math.min(ex.checks, 5) : Math.max(ex.checks, 1);
 
     return (
-      <Card className="p-4 space-y-3">
-        <h2 className="text-base font-bold">■ {g.label}</h2>
+      <div className="py-3">
+        {/* 1行目：種目名のみ（小さなノルマ表記は削除） */}
+        <div className="font-medium leading-tight">{ex.name}</div>
+
+        {/* 2行目：入力UI（チェック or 回数） */}
+        {ex.mode === "count" ? (
+          <div
+            className="mt-2 grid gap-2"
+            style={{ gridTemplateColumns: `repeat(${displayChecks}, minmax(3.75rem, 1fr))` }}
+          >
+            {Array.from({ length: displayChecks }).map((_, idx) => {
+              const raw = dayRecord.counts?.[ex.id]?.[idx];
+              const value: number | string = typeof raw === "number" ? raw : "";
+              return (
+                <div key={idx} className="flex items-center gap-1">
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    className="w-16 text-right"
+                    placeholder={ex.target ? String(ex.target) : "0"}
+                    value={value}
+                    onChange={(e) => setCountAt(ex.id, idx, Number(e.target.value))}
+                    aria-label={`${ex.name} セット${idx + 1} 回数`}
+                  />
+                  <span className="text-xs opacity-70">回</span>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div
+            className="mt-2 grid gap-2"
+            style={{ gridTemplateColumns: `repeat(${displayChecks}, 2.75rem)` }}
+          >
+            {Array.from({ length: displayChecks }).map((_, idx) => {
+              const checked = dayRecord.sets[ex.id]?.[idx] || false;
+              return (
+                <Checkbox
+                  key={idx}
+                  className="h-11 w-11 border-2 rounded-none"
+                  checked={checked}
+                  onCheckedChange={() => toggleSet(ex.id, idx)}
+                  aria-label={`${ex.name} セット${idx + 1}`}
+                />
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function CategoryBlock({ group }: { group: GroupUI }) {
+    const g = group;
+    return (
+      <Card className="p-4">
+        <h2 className="text-base font-bold mb-2">■ {g.label}</h2>
 
         <div className="divide-y">
-          {g.items.map((ex) => {
-            const note =
-              ex.mode === "count"
-                ? ex.target
-                  ? `ノルマ ${ex.target}回`
-                  : "回数入力"
-                : `ノルマ ${ex.checks}セット`;
-
-            return (
-              <div key={ex.id} className="flex items-center justify-between py-2">
-                <div className="pr-4 leading-snug">
-                  <div className="font-medium">{ex.name}</div>
-                  <div className="text-xs opacity-60 mt-0.5">{note}</div>
-                </div>
-
-                {ex.mode === "count" ? (
-                  // 回数入力：セット数ぶんの入力欄 + placeholder にノルマ回数
-                  <div
-                    className="grid gap-2"
-                    style={{ gridTemplateColumns: `repeat(${Math.max(ex.checks, 1)}, 4.5rem)` }}
-                  >
-                    {Array.from({ length: Math.max(ex.checks, 1) }).map((_, idx) => {
-                      const raw = dayRecord.counts?.[ex.id]?.[idx];
-                      const value: number | string = typeof raw === "number" ? raw : "";
-                      return (
-                        <div key={idx} className="flex items-center gap-1">
-                          <Input
-                            type="number"
-                            inputMode="numeric"
-                            min={0}
-                            className="w-16 text-right"
-                            placeholder={ex.target ? String(ex.target) : "0"}
-                            value={value}
-                            onChange={(e) => setCountAt(ex.id, idx, Number(e.target.value))}
-                            aria-label={`${ex.name} セット${idx + 1} 回数`}
-                          />
-                          <span className="text-xs opacity-70">回</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  // チェック入力：セット数ぶんのチェック
-                  <div
-                    className="grid gap-2"
-                    style={{ gridTemplateColumns: `repeat(${Math.max(maxChecks, 1)}, 2.75rem)` }}
-                  >
-                    {Array.from({ length: Math.max(ex.checks, 1) }).map((_, idx) => {
-                      const checked = dayRecord.sets[ex.id]?.[idx] || false;
-                      return (
-                        <Checkbox
-                          key={idx}
-                          className="h-11 w-11 border-2 rounded-none"
-                          checked={checked}
-                          onCheckedChange={() => toggleSet(ex.id, idx)}
-                          aria-label={`${ex.name} セット${idx + 1}`}
-                        />
-                      );
-                    })}
-                    {/* レイアウト合わせ用の透明ダミー */}
-                    {Array.from({ length: Math.max(maxChecks - ex.checks, 0) }).map((_, i) => (
-                      <div key={`gap-${i}`} className="h-11 w-11 opacity-0" />
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-
+          {g.items.map((ex) => (
+            <ExerciseRow key={ex.id} ex={ex} />
+          ))}
           {g.items.length === 0 && <div className="py-2 text-sm opacity-60">（種目なし）</div>}
         </div>
 
         {/* 備考欄 */}
-        <div className="space-y-1">
+        <div className="space-y-1 mt-3">
           <div className="text-sm font-medium">備考</div>
           <Textarea
             value={(dayRecord as any)[g.noteField] || ""}

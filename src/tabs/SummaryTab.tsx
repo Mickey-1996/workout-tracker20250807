@@ -5,355 +5,228 @@ import { useEffect, useMemo, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { loadExercises } from "@/lib/local-storage";
 
-// ---- 既存フォーマットに依存しない最小型（後方互換で柔軟に解釈） ----
-type DayRecordLoose = {
-  date?: unknown;
-  sets?: unknown;    // Record<string, boolean[]>
-  counts?: unknown;  // Record<string, number | number[] | { total?: number; reps?: number[] }>
+import { loadDayRecord, loadJSON } from "@/lib/local-storage";
+import { defaultExercises } from "@/lib/exercises-default";
+
+// この画面だけで使う軽量型（types.tsは不変更）
+type Category = "upper" | "lower" | "other";
+type InputMode = "check" | "count";
+
+type ExtendedExerciseItem = {
+  id: string;
+  name: string;
+  category: Category;
+  inputMode?: InputMode;
+  checkCount?: number; // セット数（旧: sets 互換あり）
+  sets?: number;
+  enabled?: boolean;
+  order?: number;
 };
+
+type Settings = { items: ExtendedExerciseItem[] };
 
 type DayRecord = {
   date: string;
+  // チェック入力: 種目ID => セットごとの完了フラグ
   sets: Record<string, boolean[]>;
-  counts?: Record<string, number | number[] | { total?: number; reps?: number[] }>;
+  // 回数入力: 種目ID => セットごとの回数
+  counts?: Record<string, number[] | number>; // 互換のため number も許容
 };
 
-type ExerciseLike = { id: string; name: string; category?: string };
-type ExercisesState = Record<string, ExerciseLike[]>;
-
-function normalizeCat(key: string): "upper" | "lower" | "other" {
-  const k = key.toLowerCase();
-  if (k.includes("upper") || k.includes("上")) return "upper";
-  if (k.includes("lower") || k.includes("下")) return "lower";
-  return "other";
-}
-const catLabel: Record<"upper" | "lower" | "other", string> = {
-  upper: "上半身",
-  lower: "下半身",
-  other: "その他",
+type Row = {
+  id: string;
+  name: string;
+  category: Category;
+  mode: InputMode;
+  total: number;        // count: 回数合計 / check: 完了セット合計
+  unit: "回" | "セット";
 };
 
-// ---------- 日付ユーティリティ（YYYY-MM-DD 前提） ----------
-const fmt = (d: Date) => d.toISOString().split("T")[0];
-const toDate = (s: string) => {
-  const [y, m, d] = s.split("-").map(Number);
-  return new Date(y, (m ?? 1) - 1, d ?? 1);
+// --------- 日付ユーティリティ ---------
+const tz = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()); // ローカル日付固定
+const toStr = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const addDays = (d: Date, n: number) => tz(new Date(d.getFullYear(), d.getMonth(), d.getDate() + n));
+const enumerateDates = (from: Date, to: Date) => {
+  const out: string[] = [];
+  for (let cur = tz(from); cur <= tz(to); cur = addDays(cur, 1)) out.push(toStr(cur));
+  return out;
 };
-// ISO週の月曜始まり
-const startOfISOWeek = (d: Date) => {
-  const day = d.getDay(); // 0=Sun,...,6=Sat
-  const offset = (day + 6) % 7; // Mon=0, Sun=6
-  const x = new Date(d);
-  x.setDate(d.getDate() - offset);
-  return x;
+const startOfWeekMon = (d: Date) => {
+  const day = d.getDay(); // 0:日
+  const diff = day === 0 ? -6 : 1 - day; // 月始まり
+  return addDays(d, diff);
 };
 const startOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1);
 const startOfYear = (d: Date) => new Date(d.getFullYear(), 0, 1);
 
-// ---------- localStorage 全走査で DayRecord を推定 ----------
-function readAllDayRecords(): DayRecord[] {
-  if (typeof window === "undefined") return [];
-  const arr: DayRecord[] = [];
-  for (let i = 0; i < window.localStorage.length; i++) {
-    const key = window.localStorage.key(i);
-    if (!key) continue;
-    const raw = window.localStorage.getItem(key);
-    if (!raw) continue;
-    try {
-      const v: DayRecordLoose = JSON.parse(raw);
-      if (
-        v &&
-        typeof v === "object" &&
-        v.date &&
-        typeof v.date === "string" &&
-        v.sets &&
-        typeof v.sets === "object"
-      ) {
-        const rec: DayRecord = {
-          date: v.date,
-          sets: v.sets as Record<string, boolean[]>,
-        };
-        if (v.counts && typeof v.counts === "object") {
-          rec.counts = v.counts as Record<
-            string,
-            number | number[] | { total?: number; reps?: number[] }
-          >;
-        }
-        arr.push(rec);
-      }
-    } catch {
-      // JSON じゃないキーは無視
-    }
+// 既存データ互換：counts が number の場合は配列化
+function normalizeCounts(counts: DayRecord["counts"]): Record<string, number[]> {
+  if (!counts || typeof counts !== "object") return {};
+  const out: Record<string, number[]> = {};
+  for (const [k, v] of Object.entries(counts)) {
+    if (Array.isArray(v)) out[k] = v.map((n) => Math.max(0, Math.floor(Number(n) || 0)));
+    else if (typeof v === "number") out[k] = [Math.max(0, Math.floor(v))];
   }
-  return arr.sort((a, b) => a.date.localeCompare(b.date));
-}
-
-// counts の多様な形を合計値に丸める（後方互換）
-function normalizeCountValue(v: unknown): number {
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  if (Array.isArray(v)) {
-    return v.reduce((s, x) => (typeof x === "number" && Number.isFinite(x) ? s + x : s), 0);
-  }
-  if (v && typeof v === "object") {
-    const obj = v as { total?: unknown; reps?: unknown };
-    if (typeof obj.total === "number" && Number.isFinite(obj.total)) return obj.total;
-    if (Array.isArray(obj.reps)) {
-      return obj.reps.reduce(
-        (s, x) => (typeof x === "number" && Number.isFinite(x) ? s + x : s),
-        0
-      );
-    }
-  }
-  return 0;
+  return out;
 }
 
 export default function SummaryTab() {
-  const [exercises, setExercises] = useState<ExercisesState | null>(null);
-  const [records, setRecords] = useState<DayRecord[]>([]);
-  const [start, setStart] = useState<string>("");
-  const [end, setEnd] = useState<string>("");
+  const today = useMemo(() => tz(new Date()), []);
+  const [from, setFrom] = useState<Date>(startOfMonth(today));
+  const [to, setTo] = useState<Date>(today);
 
-  // 初期ロード：種目・全レコード
+  // 設定（なければデフォルト）
+  const [items, setItems] = useState<ExtendedExerciseItem[]>([]);
   useEffect(() => {
-    const ex = loadExercises();
-    if (ex) setExercises(ex);
-    const all = readAllDayRecords();
-    setRecords(all);
-
-    // 期間初期値：直近30日（レコードがあれば最終日基準）
-    const today = fmt(new Date());
-    const endDate = all.length ? all[all.length - 1].date : today;
-    const d = new Date(endDate);
-    d.setDate(d.getDate() - 29);
-    setStart(fmt(d));
-    setEnd(endDate);
+    const saved = loadJSON<Settings>("settings-v1");
+    const arr = saved?.items?.length ? saved.items : (defaultExercises as ExtendedExerciseItem[]);
+    // 非表示は集計対象から除外
+    setItems(arr.filter((x) => x.enabled !== false));
   }, []);
 
-  // 種目マップ（id -> name, cat）
-  const exIndex = useMemo(() => {
-    const map = new Map<string, { name: string; cat: "upper" | "lower" | "other" }>();
-    if (exercises) {
-      for (const [k, arr] of Object.entries(exercises)) {
-        const cat = normalizeCat(k);
-        for (const ex of arr) {
-          map.set(ex.id, { name: ex.name, cat });
+  // 種目別の合計だけを算出（カテゴリ合計は表示しない）
+  const rows: Row[] = useMemo(() => {
+    if (!items.length) return [];
+
+    const dates = enumerateDates(from, to);
+    // 初期化
+    const acc: Record<string, Row> = {};
+    for (const it of items) {
+      const mode: InputMode = it.inputMode ?? "check";
+      acc[it.id] = {
+        id: it.id,
+        name: it.name,
+        category: it.category,
+        mode,
+        total: 0,
+        unit: mode === "count" ? "回" : "セット",
+      };
+    }
+
+    // 走査
+    for (const ds of dates) {
+      const rec = loadDayRecord(ds) as DayRecord | null;
+      if (!rec) continue;
+      const counts = normalizeCounts(rec.counts);
+
+      for (const it of items) {
+        const row = acc[it.id];
+        if (!row) continue;
+
+        if (row.mode === "count") {
+          // 回数合計
+          const arr = counts[it.id] || [];
+          row.total += arr.reduce((s, n) => s + (Number.isFinite(n) ? (n as number) : 0), 0);
+        } else {
+          // 完了セット合計（true数）
+          const flags = rec.sets?.[it.id] || [];
+          row.total += flags.reduce((s, b) => s + (b ? 1 : 0), 0);
         }
       }
     }
-    return map;
-  }, [exercises]);
 
-  // 期間でフィルタ
-  const ranged = useMemo(() => {
-    if (!start || !end) return [];
-    return records.filter((r) => r.date >= start && r.date <= end);
-  }, [records, start, end]);
+    // 表示順：カテゴリ→order→名前
+    const orderMap = new Map(items.map((x) => [x.id, x.order ?? 0]));
+    const catOrder: Record<Category, number> = { upper: 0, lower: 1, other: 2 };
 
-  // 集計（完了セット数 + 回数合計）
-  const rows = useMemo(() => {
-    type Acc = {
-      name: string;
-      cat: "upper" | "lower" | "other";
-      setTotal: number;  // 完了セット数
-      repTotal: number;  // 回数合計
-      days: Set<string>; // 実施日集合（セット or 回数のどちらか>0でカウント）
-    };
-    const acc = new Map<string, Acc>(); // exId -> acc
-
-    for (const r of ranged) {
-      const setEntries = Object.entries(r.sets || {});
-      const countEntries = r.counts && typeof r.counts === "object"
-        ? Object.entries(r.counts as Record<string, unknown>)
-        : [];
-
-      // sets 側
-      for (const [exId, arr] of setEntries) {
-        const info = exIndex.get(exId) ?? { name: "（削除済みの種目）", cat: "other" as const };
-        const done = Array.isArray(arr) ? arr.filter(Boolean).length : 0;
-        if (!acc.has(exId)) {
-          acc.set(exId, { name: info.name, cat: info.cat, setTotal: 0, repTotal: 0, days: new Set() });
-        }
-        const a = acc.get(exId)!;
-        a.setTotal += done;
-        if (done > 0) a.days.add(r.date);
-      }
-
-      // counts 側
-      for (const [exId, val] of countEntries) {
-        const info = exIndex.get(exId) ?? { name: "（削除済みの種目）", cat: "other" as const };
-        const reps = normalizeCountValue(val);
-        if (!acc.has(exId)) {
-          acc.set(exId, { name: info.name, cat: info.cat, setTotal: 0, repTotal: 0, days: new Set() });
-        }
-        const a = acc.get(exId)!;
-        a.repTotal += reps;
-        if (reps > 0) a.days.add(r.date);
-      }
-    }
-
-    const out = Array.from(acc.entries()).map(([id, v]) => ({
-      id,
-      name: v.name,
-      cat: v.cat,
-      daysCount: v.days.size,
-      setTotal: v.setTotal,
-      repTotal: v.repTotal,
-    }));
-    // 並び：カテゴリ -> 回数合計 desc -> セット合計 desc -> 名前
-    out.sort((a, b) => {
-      const cg = a.cat.localeCompare(b.cat);
-      if (cg !== 0) return cg;
-      if (b.repTotal !== a.repTotal) return b.repTotal - a.repTotal;
-      if (b.setTotal !== a.setTotal) return b.setTotal - a.setTotal;
-      return a.name.localeCompare(b.name);
+    return Object.values(acc).sort((a, b) => {
+      const ca = catOrder[a.category] - catOrder[b.category];
+      if (ca !== 0) return ca;
+      const oa = (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0);
+      if (oa !== 0) return oa;
+      return a.name.localeCompare(b.name, "ja");
     });
-    return out;
-  }, [ranged, exIndex]);
+  }, [items, from, to]);
 
-  // カテゴリ別合計（セット/回数）
-  const catTotals = useMemo(() => {
-    const init = {
-      upper: { sets: 0, reps: 0 },
-      lower: { sets: 0, reps: 0 },
-      other: { sets: 0, reps: 0 },
-    } as Record<"upper" | "lower" | "other", { sets: number; reps: number }>;
-    for (const r of rows) {
-      init[r.cat].sets += r.setTotal;
-      init[r.cat].reps += r.repTotal;
+  // クイック期間
+  const setPreset = (key: "today" | "week" | "month" | "year") => {
+    const base = tz(new Date());
+    if (key === "today") {
+      setFrom(base);
+      setTo(base);
+    } else if (key === "week") {
+      setFrom(startOfWeekMon(base));
+      setTo(base);
+    } else if (key === "month") {
+      setFrom(startOfMonth(base));
+      setTo(base);
+    } else {
+      setFrom(startOfYear(base));
+      setTo(base);
     }
-    return init;
-  }, [rows]);
-
-  // ========== クイック期間プリセット ==========
-  const endBound = useMemo(() => {
-    const today = fmt(new Date());
-    if (records.length === 0) return today;
-    const last = records[records.length - 1].date;
-    return last < today ? last : today; // データ最終日と今日の早い方
-  }, [records]);
-
-  const setQuickDays = (days: number) => {
-    const e = endBound;
-    const d = toDate(e);
-    d.setDate(d.getDate() - (days - 1));
-    setStart(fmt(d));
-    setEnd(e);
   };
 
-  const setThisWeek = () => {
-    const e = endBound;
-    const s = startOfISOWeek(toDate(e));
-    setStart(fmt(s));
-    setEnd(e);
-  };
-
-  const setThisMonth = () => {
-    const e = endBound;
-    const s = startOfMonth(toDate(e));
-    setStart(fmt(s));
-    setEnd(e);
-  };
-
-  const setThisYear = () => {
-    const e = endBound;
-    const s = startOfYear(toDate(e));
-    setStart(fmt(s));
-    setEnd(e);
-  };
-
-  const setAll = () => {
-    if (!records.length) return;
-    setStart(records[0].date);
-    setEnd(records[records.length - 1].date);
-  };
-
-  // ========== UI ==========
   return (
-    <div className="space-y-6">
-      <h2 className="text-xl font-bold">集計</h2>
-
+    <div className="space-y-4">
       {/* 期間コントロール */}
       <Card className="p-4 space-y-3">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-6 sm:items-center">
-          <label className="sm:col-span-2">
-            <div className="text-sm opacity-80">開始日</div>
-            <Input type="date" value={start} onChange={(e) => setStart(e.target.value)} />
-          </label>
-          <label className="sm:col-span-2">
-            <div className="text-sm opacity-80">終了日</div>
-            <Input type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
-          </label>
-          <div className="flex flex-wrap gap-2 sm:col-span-2 sm:justify-end">
-            {/* 既存 */}
-            <Button variant="secondary" onClick={() => setQuickDays(7)}>直近7日</Button>
-            <Button variant="secondary" onClick={() => setQuickDays(30)}>直近30日</Button>
-            {/* 追加プリセット */}
-            <Button variant="secondary" onClick={setThisWeek}>今週</Button>
-            <Button variant="secondary" onClick={setThisMonth}>今月</Button>
-            <Button variant="secondary" onClick={setThisYear}>今年</Button>
-            {/* 全期間 */}
-            <Button onClick={setAll}>全期間</Button>
+        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+          <div className="flex gap-3">
+            <div>
+              <div className="text-xs opacity-70">開始日</div>
+              <Input
+                type="date"
+                value={toStr(from)}
+                onChange={(e) => setFrom(new Date(e.target.value))}
+                className="w-40"
+              />
+            </div>
+            <div>
+              <div className="text-xs opacity-70">終了日</div>
+              <Input
+                type="date"
+                value={toStr(to)}
+                onChange={(e) => setTo(new Date(e.target.value))}
+                className="w-40"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={() => setPreset("today")}>今日</Button>
+            <Button variant="secondary" onClick={() => setPreset("week")}>今週</Button>
+            <Button variant="secondary" onClick={() => setPreset("month")}>今月</Button>
+            <Button variant="secondary" onClick={() => setPreset("year")}>今年</Button>
           </div>
         </div>
-        <p className="text-xs opacity-70">
-          ※ 記録は端末の localStorage を走査して集計します（保存形式は変更しません）。<br />
-          ※ <code>counts</code> が存在すれば回数も集計します（数値 / 数値配列 / {"{ total }"} / {"{ reps: [...] }"} に対応）。<br />
-          ※ 「今週」は月曜はじまりで計算します（ISO週）。
-        </p>
       </Card>
 
-      {/* カテゴリ合計（セット / 回数） */}
+      {/* 種目別集計のみ（カテゴリ合計は非表示） */}
       <Card className="p-4">
-        <h3 className="font-semibold mb-3">カテゴリ合計</h3>
-        <div className="grid grid-cols-3 gap-3 text-center">
-          {(["upper", "lower", "other"] as const).map((k) => (
-            <div key={k} className="rounded-md border p-3 space-y-1">
-              <div className="text-xs opacity-70">{catLabel[k]}</div>
-              <div className="text-sm opacity-70">完了セット数</div>
-              <div className="text-xl font-bold">{catTotals[k].sets}</div>
-              <div className="text-sm opacity-70 mt-2">回数合計</div>
-              <div className="text-xl font-bold">{catTotals[k].reps}</div>
-            </div>
-          ))}
-        </div>
-      </Card>
+        <h2 className="text-base font-bold mb-3">種目別集計</h2>
 
-      {/* 明細テーブル（セット / 回数 / 実施日数） */}
-      <Card className="p-0 overflow-hidden">
-        <div className="p-4 pb-0">
-          <h3 className="font-semibold">種目別 集計（{start || "—"} 〜 {end || "—"}）</h3>
-        </div>
         <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="bg-black/5">
-              <tr>
-                <th className="px-4 py-2 text-left whitespace-nowrap">カテゴリ</th>
-                <th className="px-4 py-2 text-left">種目</th>
-                <th className="px-4 py-2 text-right whitespace-nowrap">完了セット数</th>
-                <th className="px-4 py-2 text-right whitespace-nowrap">回数合計</th>
-                <th className="px-4 py-2 text-right whitespace-nowrap">実施日数</th>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b">
+                <th className="text-left py-2 pr-3">カテゴリ</th>
+                <th className="text-left py-2 pr-3">種目</th>
+                <th className="text-left py-2 pr-3">方式</th>
+                <th className="text-right py-2">合計</th>
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 ? (
+              {rows.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-6 text-center opacity-70">
-                    集計対象の記録がありません
+                  <td colSpan={4} className="py-6 text-center opacity-60">
+                    集計対象のデータがありません
                   </td>
                 </tr>
-              ) : (
-                rows.map((r) => (
-                  <tr key={r.id} className="border-t">
-                    <td className="px-4 py-2">{catLabel[r.cat]}</td>
-                    <td className="px-4 py-2">{r.name}</td>
-                    <td className="px-4 py-2 text-right">{r.setTotal}</td>
-                    <td className="px-4 py-2 text-right">{r.repTotal}</td>
-                    <td className="px-4 py-2 text-right">{r.daysCount}</td>
-                  </tr>
-                ))
               )}
+              {rows.map((r) => (
+                <tr key={r.id} className="border-b last:border-b-0">
+                  <td className="py-2 pr-3">
+                    {r.category === "upper" ? "上半身" : r.category === "lower" ? "下半身" : "その他"}
+                  </td>
+                  <td className="py-2 pr-3">{r.name}</td>
+                  <td className="py-2 pr-3">{r.mode === "count" ? "回数入力" : "チェック"}</td>
+                  <td className="py-2 text-right">
+                    {r.total.toLocaleString()} {r.unit}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
