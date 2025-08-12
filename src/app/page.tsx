@@ -9,7 +9,7 @@ export default function Page() {
       <header className="mb-6">
         <h1 className="text-2xl font-bold">筋トレ記録アプリ</h1>
         <p className="text-sm text-muted-foreground">
-          日々のトレーニングをサクッと記録。ローカル保存（localStorage）で手軽に管理できます。
+          日々の筋トレの記録と管理
         </p>
       </header>
 
