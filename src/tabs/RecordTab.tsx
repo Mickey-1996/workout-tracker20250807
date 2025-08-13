@@ -93,6 +93,25 @@ type LastPrevMap = Record<string, string | undefined>;
 
 const COUNT_MAX = 99;
 
+/** 📅の代替：シンプルなカレンダーSVG（絵文字依存を避ける） */
+function CalendarIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="4" width="18" height="17" rx="2" />
+      <path d="M8 2v4M16 2v4M3 10h18" />
+    </svg>
+  );
+}
+
 export default function RecordTab() {
   /* 設定→メタ */
   const [meta, setMeta] = useState<MetaMap>({});
@@ -293,9 +312,12 @@ export default function RecordTab() {
 
   return (
     <div className="space-y-4">
-      {/* 右上に本日日付 */}
+      {/* 右上に本日日付（絵文字ではなくSVG） */}
       <div className="flex items-center justify-end">
-        <div className="text-sm text-muted-foreground">📅 {fmtDateJP(todayStr)}</div>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <CalendarIcon className="w-5 h-5 text-slate-500" />
+          <time dateTime={todayStr}>{fmtDateJP(todayStr)}</time>
+        </div>
       </div>
 
       {Object.entries(exercises).map(([category, categoryExercises]) => {
