@@ -17,10 +17,13 @@ import { loadDayRecord, saveDayRecord, loadJSON } from "@/lib/local-storage";
 const MEMO_EXAMPLE = "（例）アーチャープッシュアップも10回やった";
 /* ================================================ */
 
-/** セルサイズ（チェック/回数とも同じサイズ：約1.3倍） */
-const CELL = 52; // px
-const GAP_PX = 8; // gap-2 相当
-const GRID_WIDTH_PX = 3 * CELL + 2 * GAP_PX; // 1行3セル＋2ギャップを右寄せ
+/** セルサイズ（チェック/回数とも同じサイズ・デフォルト0.8倍） */
+const BASE_CELL = 52;          // 以前の基準
+const CELL = Math.round(BASE_CELL * 0.8); // 0.8倍 → 42px
+const MIN_CELL = 36;           // 狭い画面での最小値（従来44→36）
+const GAP_PX = 8;              // gap-2 相当
+const MAX_COLS = 5;            // 1行最大5つ
+const GRID_WIDTH_PX = MAX_COLS * CELL + (MAX_COLS - 1) * GAP_PX; // 右寄せ用の最大幅
 
 type DayRecord = {
   date: string;
@@ -29,7 +32,6 @@ type DayRecord = {
   notesOther?: string;
   sets: Record<string, boolean[]>;
   counts?: Record<string, number[]>;
-  /** 追加：各セットの「正の入力（チェックON or 回数>0）」が最後に行われたISO時刻 */
   times?: Record<string, (string | null)[]>;
 };
 
@@ -81,11 +83,10 @@ const isSameDay = (iso?: string, ymd?: string) => {
   return iso.slice(0, 10) === ymd;
 };
 
-// 互換のため複数キーを扱う
+// 互換キー
 const KEY_V1 = "last-done-v1";
 const KEY_V0 = "last-done";
 const KEY_ALT = "lastDone";
-// 取り消し用の直前値
 const KEY_PREV = "last-done-prev-v1";
 
 type LastDoneMap = Record<string, string>;
@@ -93,7 +94,7 @@ type LastPrevMap = Record<string, string | undefined>;
 
 const COUNT_MAX = 99;
 
-/** 📅の代替：シンプルなカレンダーSVG（絵文字依存を避ける） */
+/** 小さなカレンダーアイコン（絵文字依存回避） */
 function CalendarIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -127,7 +128,7 @@ export default function RecordTab() {
     setMeta(m);
   }, []);
 
-  /* カテゴリ別配列 */
+  /* カテゴリ配列 */
   const [exercises, setExercises] = useState<ExercisesState | null>(null);
   useEffect(() => {
     if (Object.keys(meta).length === 0) return;
@@ -166,7 +167,7 @@ export default function RecordTab() {
         notesOther: loaded.notesOther ?? "",
         sets: loaded.sets ?? {},
         counts: loaded.counts ?? {},
-        times: loaded.times ?? {}, // 追加フィールドは後方互換
+        times: loaded.times ?? {},
       });
     }
   }, []);
@@ -176,7 +177,7 @@ export default function RecordTab() {
     (saveDayRecord as any)(todayStr, rec);
   };
 
-  /* 最終実施（インターバル表示用） */
+  /* 最終実施 */
   const [lastDone, setLastDone] = useState<LastDoneMap>({});
   const [lastPrev, setLastPrev] = useState<LastPrevMap>({});
   useEffect(() => {
@@ -190,15 +191,13 @@ export default function RecordTab() {
   const writeLastAll = (map: LastDoneMap, prev: LastPrevMap) => {
     try {
       window.localStorage.setItem(KEY_V1, JSON.stringify(map));
-      window.localStorage.setItem(KEY_V0, JSON.stringify(map)); // 互換
+      window.localStorage.setItem(KEY_V0, JSON.stringify(map));
       window.localStorage.setItem(KEY_PREV, JSON.stringify(prev));
     } catch {}
   };
 
-  /** 当日の times[*] から「その種目の最新実施時刻（最大）」を計算し、last-done を同期 */
   const recomputeAndSyncLastDone = (exerciseId: string, record: DayRecord) => {
     const arr = record.times?.[exerciseId] ?? [];
-    // 有効なISOのみ
     const valid = arr.filter((x): x is string => !!x);
     const latest = valid.length
       ? valid.reduce((a, b) => (a > b ? a : b))
@@ -207,7 +206,6 @@ export default function RecordTab() {
     setLastDone((cur) => {
       if (latest) {
         if (cur[exerciseId] !== latest) {
-          // 上書き前を prev に退避
           setLastPrev((pp) => {
             const nextPrev = { ...pp, [exerciseId]: cur[exerciseId] };
             const next = { ...cur, [exerciseId]: latest };
@@ -216,9 +214,8 @@ export default function RecordTab() {
           });
           return { ...cur, [exerciseId]: latest };
         }
-        return cur; // 変更なし
+        return cur;
       } else {
-        // 当日入力がゼロ：当日分のlast-doneなら巻き戻し
         if (isSameDay(cur[exerciseId], todayStr)) {
           const prevTime = lastPrev[exerciseId];
           const next = { ...cur };
@@ -230,7 +227,7 @@ export default function RecordTab() {
           setLastPrev(nextPrev);
           return next;
         }
-        return cur; // 以前日の記録はそのまま
+        return cur;
       }
     });
   };
@@ -243,52 +240,39 @@ export default function RecordTab() {
     arr[setIndex] = nowOn;
     sets[exerciseId] = arr;
 
-    // times を更新
     const times = { ...(dayRecord.times || {}) };
     const tArr = [...(times[exerciseId] ?? [])];
-    if (nowOn) {
-      tArr[setIndex] = new Date().toISOString();
-    } else {
-      tArr[setIndex] = null; // 取消
-    }
     times[exerciseId] = tArr;
+    tArr[setIndex] = nowOn ? new Date().toISOString() : null;
 
     const next: DayRecord = { ...dayRecord, sets, times };
     persist(next);
-    // 最新実施時刻を再計算して反映
     recomputeAndSyncLastDone(exerciseId, next);
   };
 
-  /* 回数選択（0～99のセレクト） */
+  /* 回数選択 */
   const changeCount = (exerciseId: string, setIndex: number, value: string) => {
     let n = Math.floor(Number(value || "0"));
     if (!Number.isFinite(n) || n < 0) n = 0;
 
     const counts = { ...(dayRecord.counts || {}) };
     const cArr = [...(counts[exerciseId] ?? [])];
-    // 足りない分は0で埋める
     const needLen = Math.max(setIndex + 1, cArr.length);
     for (let i = 0; i < needLen; i++) if (cArr[i] == null) cArr[i] = 0;
     cArr[setIndex] = n;
     counts[exerciseId] = cArr;
 
-    // times を更新（回数>0 なら記録、0なら取消）
     const times = { ...(dayRecord.times || {}) };
     const tArr = [...(times[exerciseId] ?? [])];
-    if (n > 0) {
-      tArr[setIndex] = new Date().toISOString();
-    } else {
-      tArr[setIndex] = null;
-    }
     times[exerciseId] = tArr;
+    tArr[setIndex] = n > 0 ? new Date().toISOString() : null;
 
     const next: DayRecord = { ...dayRecord, counts, times };
     persist(next);
-    // 最新実施時刻を再計算して反映
     recomputeAndSyncLastDone(exerciseId, next);
   };
 
-  /* メモ */
+  /* メモ欄 */
   const handleCatNotesChange = (cat: Category, value: string) => {
     if (cat === "upper") return persist({ ...dayRecord, notesUpper: value ?? "" });
     if (cat === "lower") return persist({ ...dayRecord, notesLower: value ?? "" });
@@ -310,9 +294,16 @@ export default function RecordTab() {
   const catLabel = (c: string) =>
     c === "upper" ? "上半身" : c === "lower" ? "下半身" : "その他";
 
+  // 右寄せエリア：幅は 5列分、セルは CSS 変数で制御（自動で少し縮む）
+  const gridContainerStyle = {
+    width: `min(100%, ${GRID_WIDTH_PX}px)`,
+    ["--gap" as any]: `${GAP_PX}px`,
+    ["--cell" as any]: `max(${MIN_CELL}px, calc((100% - ${(MAX_COLS - 1)} * var(--gap)) / ${MAX_COLS}))`,
+  } as any;
+
   return (
     <div className="space-y-4">
-      {/* 右上に本日日付（絵文字ではなくSVG） */}
+      {/* 右上に日付 */}
       <div className="flex items-center justify-end">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <CalendarIcon className="w-5 h-5 text-slate-500" />
@@ -348,10 +339,13 @@ export default function RecordTab() {
                     </div>
                   </div>
 
-                  {/* 2行目：右寄せ 3列グリッド（幅は style で確実に適用） */}
-                  <div className="mt-2 ml-auto" style={{ width: GRID_WIDTH_PX }}>
+                  {/* 2行目：右寄せ 5列グリッド */}
+                  <div className="mt-2 ml-auto" style={gridContainerStyle}>
                     {mode === "count" ? (
-                      <div className="grid grid-cols-3 gap-2">
+                      <div
+                        className="grid gap-2"
+                        style={{ gridTemplateColumns: `repeat(${MAX_COLS}, var(--cell))` }}
+                      >
                         {Array.from({ length: setCount }).map((_, idx) => {
                           const cur = dayRecord.counts?.[ex.id]?.[idx] ?? 0;
                           return (
@@ -362,7 +356,7 @@ export default function RecordTab() {
                             >
                               <SelectTrigger
                                 className="text-base px-1 rounded-md border"
-                                style={{ width: CELL, height: CELL }}
+                                style={{ width: "var(--cell)", height: "var(--cell)" }}
                               >
                                 <SelectValue />
                               </SelectTrigger>
@@ -378,12 +372,15 @@ export default function RecordTab() {
                         })}
                       </div>
                     ) : (
-                      <div className="grid grid-cols-3 gap-2">
+                      <div
+                        className="grid gap-2"
+                        style={{ gridTemplateColumns: `repeat(${MAX_COLS}, var(--cell))` }}
+                      >
                         {Array.from({ length: setCount }).map((_, idx) => (
                           <div
                             key={idx}
                             className="flex items-center justify-center rounded-md"
-                            style={{ width: CELL, height: CELL }}
+                            style={{ width: "var(--cell)", height: "var(--cell)" }}
                           >
                             <Checkbox
                               checked={dayRecord.sets?.[ex.id]?.[idx] || false}
@@ -393,7 +390,7 @@ export default function RecordTab() {
                                 "data-[state=checked]:[&_svg]:scale-[1.5]",
                                 "[&_svg]:transition-transform",
                               ].join(" ")}
-                              style={{ width: CELL, height: CELL }}
+                              style={{ width: "var(--cell)", height: "var(--cell)" }}
                             />
                           </div>
                         ))}
@@ -404,7 +401,7 @@ export default function RecordTab() {
               );
             })}
 
-            {/* カテゴリ別メモ欄（例文は要件通り） */}
+            {/* カテゴリ別メモ */}
             <div className="mt-2">
               <label className="block text-xs font-medium mb-1">
                 {cat === "upper" ? "上半身メモ" : cat === "lower" ? "下半身メモ" : "その他メモ"}
