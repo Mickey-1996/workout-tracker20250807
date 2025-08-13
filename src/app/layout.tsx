@@ -9,24 +9,31 @@ const inter = Inter({ subsets: ["latin"] });
 export const metadata = {
   title: "筋トレ記録アプリ",
   description: "トレーニング内容の記録・集計・設定管理ができるアプリ",
+  applicationName: "筋トレ記録アプリ",
+  themeColor: "#0ea5e9", // iOS/Android UIの色
   icons: {
-    // 通常のファビコン
     icon: [
       { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
       { url: "/favicon-16x16.png", sizes: "16x16", type: "image/png" },
       "/favicon.ico",
     ],
-    // iOS/Android ホーム追加用
     apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
   },
-  // ※ manifest を使うなら /public/site.webmanifest を用意し、以下のコメントを外してください
-  // manifest: "/site.webmanifest",
+  // /public/site.webmanifest を用意済みの想定
+  manifest: "/site.webmanifest",
+  // iOS のホーム追加向けメタ
+  appleWebApp: {
+    capable: true,
+    title: "筋トレ記録アプリ",
+    statusBarStyle: "default",
+  },
+  formatDetection: { telephone: false },
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="ja">
-      <body className={inter.className}>
+      <body className={`${inter.className} antialiased`}>
         <header className="p-4 border-b shadow-sm bg-white flex gap-4">
           <Link href="/" className="font-bold hover:underline">
             記録
