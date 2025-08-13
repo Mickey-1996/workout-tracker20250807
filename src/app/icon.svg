@@ -1,0 +1,8 @@
+<!-- シンプルなダンベルのSVGアイコン（512x512） -->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 24 24" fill="currentColor">
+  <rect x="1" y="8" width="3" height="8" rx="0.5"></rect>
+  <rect x="20" y="8" width="3" height="8" rx="0.5"></rect>
+  <rect x="4.5" y="9.5" width="3" height="5" rx="0.5"></rect>
+  <rect x="16.5" y="9.5" width="3" height="5" rx="0.5"></rect>
+  <rect x="7.5" y="11" width="9" height="2" rx="0.5"></rect>
+</svg>

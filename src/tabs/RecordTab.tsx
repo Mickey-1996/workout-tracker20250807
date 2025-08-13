@@ -18,17 +18,15 @@ import { loadDayRecord, saveDayRecord, loadJSON } from "@/lib/local-storage";
 const MEMO_EXAMPLE = "（例）アーチャープッシュアップも10回やった";
 /* ================================================ */
 
-/** セルサイズ／行幅（回数入力とチェックを揃える） */
-const CELL_SIZE = 52; // px（約1.3倍）
-const CELL_H = `h-[${CELL_SIZE}px]`;
-const CELL_W = `w-[${CELL_SIZE}px]`;
-const GAP = 8; // Tailwind gap-2 の実寸
-const GRID_W = `w-[${3 * CELL_SIZE + 2 * GAP}px]`; // 3セル＋2ギャップ＝右寄せの幅
+/** セルサイズ（チェック/回数とも同じサイズにし、前回より約1.3倍） */
+const CELL = 52; // px
+const GAP_PX = 8; // gap-2 相当
+const GRID_WIDTH_PX = 3 * CELL + 2 * GAP_PX; // 1行3セル＋2ギャップを右寄せ
 
 type DayRecord = {
   date: string;
-  notesUpper: string;
-  notesLower: string;
+  notesUpper?: string;
+  notesLower?: string;
   notesOther?: string;
   sets: Record<string, boolean[]>;
   counts?: Record<string, number[]>;
@@ -72,19 +70,21 @@ const fmtDateJP = (iso: string) => {
 
 const hoursSince = (iso?: string): number | null => {
   if (!iso) return null;
-  const last = new Date(iso).getTime();
-  if (Number.isNaN(last)) return null;
-  const now = Date.now();
-  return Math.max(0, Math.floor((now - last) / 3600000));
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return null;
+  return Math.max(0, Math.floor((Date.now() - t) / 3600000));
 };
 
-const LAST_DONE_KEY = "last-done-v1";
+// 互換のため複数キーを扱う
+const KEY_V1 = "last-done-v1";
+const KEY_V0 = "last-done";
+const KEY_ALT = "lastDone";
 type LastDoneMap = Record<string, string>;
 
 const COUNT_MAX = 99;
 
 export default function RecordTab() {
-  // 設定→メタ
+  /* 設定→メタ */
   const [meta, setMeta] = useState<MetaMap>({});
   useEffect(() => {
     const settings = loadJSON<Settings>("settings-v1");
@@ -98,26 +98,25 @@ export default function RecordTab() {
     setMeta(m);
   }, []);
 
-  // カテゴリ別配列
+  /* カテゴリ別配列 */
   const [exercises, setExercises] = useState<ExercisesState | null>(null);
   useEffect(() => {
-    if (Object.keys(meta).length) {
-      const settings = loadJSON<Settings>("settings-v1");
-      const items = settings?.items?.filter((x) => x.enabled !== false) ?? [];
-      const grouped: ExercisesState = { upper: [], lower: [], other: [] } as any;
-      for (const it of items) {
-        const setCount = meta[it.id]?.setCount ?? it.sets ?? 3;
-        (grouped[it.category] as any).push({
-          id: it.id,
-          name: it.name,
-          sets: setCount,
-        });
-      }
-      setExercises(grouped);
+    if (Object.keys(meta).length === 0) return;
+    const settings = loadJSON<Settings>("settings-v1");
+    const items = settings?.items?.filter((x) => x.enabled !== false) ?? [];
+    const grouped: ExercisesState = { upper: [], lower: [], other: [] } as any;
+    for (const it of items) {
+      const setCount = meta[it.id]?.setCount ?? it.sets ?? 3;
+      (grouped[it.category] as any).push({
+        id: it.id,
+        name: it.name,
+        sets: setCount,
+      });
     }
+    setExercises(grouped);
   }, [meta]);
 
-  // 当日レコード
+  /* 当日レコード */
   const [dayRecord, setDayRecord] = useState<DayRecord>({
     date: todayStr,
     notesUpper: "",
@@ -143,28 +142,37 @@ export default function RecordTab() {
 
   const persist = (rec: DayRecord) => {
     setDayRecord(rec);
-    // 型差異を避けるため any
+    // local-storage の型差異を避ける
     (saveDayRecord as any)(todayStr, rec);
   };
 
-  // 最終実施（インターバル表示用）
+  /* 最終実施（インターバル表示用） */
   const [lastDone, setLastDone] = useState<LastDoneMap>({});
   useEffect(() => {
-    const map = loadJSON<LastDoneMap>(LAST_DONE_KEY) ?? {};
-    setLastDone(map);
+    // 旧キー→新キーの順で読み込み
+    const v1 = loadJSON<LastDoneMap>(KEY_V1);
+    const v0 = loadJSON<LastDoneMap>(KEY_V0);
+    const alt = loadJSON<LastDoneMap>(KEY_ALT);
+    setLastDone(v1 ?? v0 ?? alt ?? {});
   }, []);
+
+  const writeAllKeys = (obj: LastDoneMap) => {
+    try {
+      window.localStorage.setItem(KEY_V1, JSON.stringify(obj));
+      window.localStorage.setItem(KEY_V0, JSON.stringify(obj));
+    } catch {}
+  };
+
   const updateLastDone = (exerciseId: string) => {
     const nowIso = new Date().toISOString();
     setLastDone((prev) => {
       const next = { ...prev, [exerciseId]: nowIso };
-      try {
-        window.localStorage.setItem(LAST_DONE_KEY, JSON.stringify(next));
-      } catch {}
+      writeAllKeys(next);
       return next;
     });
   };
 
-  // チェック切替
+  /* チェック切替 */
   const toggleSet = (exerciseId: string, setIndex: number) => {
     const sets = { ...(dayRecord.sets || {}) };
     const arr = [...(sets[exerciseId] ?? [])];
@@ -177,7 +185,7 @@ export default function RecordTab() {
     if (arr[setIndex]) updateLastDone(exerciseId);
   };
 
-  // 回数選択
+  /* 回数選択（0～99のセレクト） */
   const changeCount = (exerciseId: string, setIndex: number, value: string) => {
     let n = Math.floor(Number(value || "0"));
     if (!Number.isFinite(n) || n < 0) n = 0;
@@ -195,26 +203,28 @@ export default function RecordTab() {
     if (n > 0) updateLastDone(exerciseId);
   };
 
-  // メモ
+  /* メモ */
   const handleCatNotesChange = (cat: Category, value: string) => {
     if (cat === "upper") return persist({ ...dayRecord, notesUpper: value ?? "" });
     if (cat === "lower") return persist({ ...dayRecord, notesLower: value ?? "" });
     return persist({ ...dayRecord, notesOther: value ?? "" });
   };
 
-  // 表示ラベル
+  /* ラベル */
   const recoveryText = (exerciseId: string) => {
     const h = hoursSince(lastDone[exerciseId]);
     if (h == null) return "—";
     if (h < 1) return "<1H";
     return `${h}H`;
+    // 表示文言はUI側で付ける（「前回からのインターバル：…」）
   };
 
   if (!exercises) {
     return <div>種目データがありません。（設定タブで種目を追加してください）</div>;
   }
 
-  const catLabel = (c: string) => (c === "upper" ? "上半身" : c === "lower" ? "下半身" : "その他");
+  const catLabel = (c: string) =>
+    c === "upper" ? "上半身" : c === "lower" ? "下半身" : "その他";
 
   return (
     <div className="space-y-4">
@@ -227,9 +237,9 @@ export default function RecordTab() {
         const cat = category as Category;
         const notesValue =
           cat === "upper"
-            ? dayRecord.notesUpper
+            ? dayRecord.notesUpper ?? ""
             : cat === "lower"
-            ? dayRecord.notesLower
+            ? dayRecord.notesLower ?? ""
             : dayRecord.notesOther ?? "";
 
         return (
@@ -243,7 +253,7 @@ export default function RecordTab() {
 
               return (
                 <div key={ex.id} className="mb-4">
-                  {/* 1行目：種目名 + インターバル（常に表示・折返し時は右寄せで2行目へ） */}
+                  {/* 1行目：種目名 + インターバル */}
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                     <div className="font-medium text-sm">{ex.name}</div>
                     <div className="ml-auto w-full sm:w-auto text-sm text-slate-500 text-right">
@@ -251,8 +261,8 @@ export default function RecordTab() {
                     </div>
                   </div>
 
-                  {/* 2行目：入力行（右寄せ・固定幅）。どちらも3列で改行 */}
-                  <div className={`mt-2 ${GRID_W} ml-auto`}>
+                  {/* 2行目：右寄せ 3列グリッド（幅は style で確実に適用） */}
+                  <div className="mt-2 ml-auto" style={{ width: GRID_WIDTH_PX }}>
                     {mode === "count" ? (
                       <div className="grid grid-cols-3 gap-2">
                         {Array.from({ length: setCount }).map((_, idx) => {
@@ -263,7 +273,10 @@ export default function RecordTab() {
                               value={String(cur)}
                               onValueChange={(v) => changeCount(ex.id, idx, v)}
                             >
-                              <SelectTrigger className={`${CELL_H} ${CELL_W} text-base px-1`}>
+                              <SelectTrigger
+                                className="text-base px-1 rounded-md border"
+                                style={{ width: CELL, height: CELL }}
+                              >
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent className="max-h-64">
@@ -282,20 +295,19 @@ export default function RecordTab() {
                         {Array.from({ length: setCount }).map((_, idx) => (
                           <div
                             key={idx}
-                            className={`flex items-center justify-center ${CELL_H} ${CELL_W}`}
+                            className="flex items-center justify-center rounded-md"
+                            style={{ width: CELL, height: CELL }}
                           >
                             <Checkbox
                               checked={dayRecord.sets?.[ex.id]?.[idx] || false}
                               onCheckedChange={() => toggleSet(ex.id, idx)}
-                              // ボックスを1.3倍、チェックマークは約1.5倍に
                               className={[
-                                CELL_H,
-                                CELL_W,
-                                "rounded-md",
-                                // チェックアイコンの拡大（shadcn/uiの内部SVGを対象）
+                                "rounded-md border-2", // 罫線少し太め
+                                // チェックマークを約1.5倍に
                                 "data-[state=checked]:[&_svg]:scale-[1.5]",
                                 "[&_svg]:transition-transform",
                               ].join(" ")}
+                              style={{ width: CELL, height: CELL }}
                             />
                           </div>
                         ))}
@@ -306,7 +318,7 @@ export default function RecordTab() {
               );
             })}
 
-            {/* カテゴリ別メモ欄（記述例は共通） */}
+            {/* カテゴリ別メモ欄（例文は要件通りに固定） */}
             <div className="mt-2">
               <label className="block text-xs font-medium mb-1">
                 {cat === "upper" ? "上半身メモ" : cat === "lower" ? "下半身メモ" : "その他メモ"}
@@ -324,3 +336,4 @@ export default function RecordTab() {
     </div>
   );
 }
+
