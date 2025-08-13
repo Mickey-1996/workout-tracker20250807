@@ -1,8 +1,8 @@
-// src/app/layout.tsx
+/// src/app/layout.tsx
 import "../styles/globals.css";
 import { Inter } from "next/font/google";
 import Link from "next/link";
-import Image from "next/image"; // ← 追加
+import Image from "next/image";
 import type { ReactNode } from "react";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -34,19 +34,18 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="ja">
       <body className={`${inter.className} antialiased`}>
         <header className="p-4 border-b shadow-sm bg-white flex items-center gap-4">
-          {/* ← アイコンを追加（ホームにリンク） */}
+          {/* アイコンを2倍強(60px)に拡大 */}
           <Link href="/" className="shrink-0" aria-label="トップへ">
             <Image
               src="/android-chrome-192x192.png"
               alt="アプリアイコン"
-              width={28}
-              height={28}
+              width={60}
+              height={60}
               className="rounded-md"
               priority
             />
           </Link>
 
-          {/* ナビゲーション */}
           <nav className="flex gap-4">
             <Link href="/" className="font-bold hover:underline">
               記録
@@ -64,3 +63,4 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     </html>
   );
 }
+
