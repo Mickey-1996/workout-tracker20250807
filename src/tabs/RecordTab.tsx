@@ -18,7 +18,7 @@ const MEMO_EXAMPLE = "（例）アーチャープッシュアップも10回や�
 
 /* ====== レイアウト定数 ====== */
 const CELL = 50;        // セルの基準サイズ（px）
-const GAP = 8;          // gap-2 相当
+const GAP = 8;          // gap-2 相当（必要なら微調整）
 const MAX_COLS = 5;     // 1 行の最大個数
 const COUNT_MAX = 99;   // 回数プルダウンの上限
 /* ========================== */
@@ -65,7 +65,23 @@ type DayRecord = {
   times?: Record<string, (string | null)[]>;
 };
 
-const todayStr = new Date().toISOString().split("T")[0];
+/* ====== ここから “端末ローカル時間” 版 ====== */
+// 端末ローカルの YYYY-MM-DD を返す
+const ymdLocal = (d: Date) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const da = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${da}`;
+};
+
+// 「今日」の判定にローカル日付を使う
+const todayStr = ymdLocal(new Date());
+
+// ローカル日付で同日判定
+const isSameDay = (iso?: string, ymd?: string) =>
+  iso && ymd ? ymdLocal(new Date(iso)) === ymd : false;
+/* =========================================== */
+
 const fmtDateJP = (iso: string) => {
   const [y, m, d] = iso.split("-").map(Number);
   return `${y}年${m}月${d}日`;
@@ -78,11 +94,6 @@ const hoursSince = (iso?: string): number | null => {
   return Math.max(0, Math.floor((Date.now() - t) / 3600000));
 };
 
-const isSameDay = (iso?: string, ymd?: string) => {
-  if (!iso || !ymd) return false;
-  return iso.slice(0, 10) === ymd;
-};
-
 // 互換キー（前回実施保存用）
 const KEY_V1 = "last-done-v1";
 const KEY_V0 = "last-done";
@@ -91,7 +102,7 @@ const KEY_PREV = "last-done-prev-v1";
 type LastDoneMap = Record<string, string>;
 type LastPrevMap = Record<string, string | undefined>;
 
-/** 小さめのカレンダーアイコン（数値は表示しない） */
+/** カレンダーアイコン（数値は表示しない） */
 function CalendarIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -182,7 +193,7 @@ export default function RecordTab() {
     const v0 = loadJSON<LastDoneMap>(KEY_V0);
     const alt = loadJSON<LastDoneMap>(KEY_ALT);
     setLastDone(v1 ?? v0 ?? alt ?? {});
-    setLastPrev(loadJSON<LastPrevMap>(KEY_PREV) ?? {});
+    setLastPrev(loadJSON<LastPrevMap>(KEY_PREV) ?? {};
   }, []);
 
   const writeLastAll = (map: LastDoneMap, prev: LastPrevMap) => {
@@ -291,7 +302,7 @@ export default function RecordTab() {
 
   return (
     <div className="space-y-4">
-      {/* 右上に日付 */}
+      {/* 右上に日付（ローカル日付） */}
       <div className="flex items-center justify-end">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <CalendarIcon className="w-5 h-5 text-slate-500" />
@@ -328,7 +339,7 @@ export default function RecordTab() {
                     </div>
                   </div>
 
-                  {/* 2 行目：右寄せセル群（inline-grid で幅=内容、確実に 1 行最大 5 個） */}
+                  {/* 2 行目：右寄せセル群（inline-grid で幅=内容） */}
                   <div className="mt-2 flex justify-end">
                     {mode === "count" ? (
                       <div
