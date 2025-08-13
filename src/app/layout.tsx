@@ -1,8 +1,8 @@
 // src/app/layout.tsx
 import "../styles/globals.css";
-import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import Link from "next/link";
+import type { Metadata } from "next";
 import { ReactNode } from "react";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -10,9 +10,11 @@ const inter = Inter({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "筋トレ記録アプリ",
   description: "トレーニング内容の記録・集計・設定管理ができるアプリ",
+  // favicon / touch icon 設定
   icons: {
     apple: "/apple-touch-icon.png",
     icon: [
+      { url: "/favicon.ico", sizes: "any" }, // 追加（ICO）
       { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
       { url: "/favicon-16x16.png", sizes: "16x16", type: "image/png" },
     ],
