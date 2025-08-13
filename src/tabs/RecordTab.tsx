@@ -1,3 +1,4 @@
+// src/tabs/RecordTab.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -17,10 +18,10 @@ import { loadDayRecord, saveDayRecord, loadJSON } from "@/lib/local-storage";
 const MEMO_EXAMPLE = "（例）アーチャープッシュアップも10回やった";
 /* ================================================ */
 
-/** セルサイズ（チェック/回数とも同じサイズ・デフォルト0.8倍） */
-const BASE_CELL = 52;          // 以前の基準
-const CELL = Math.round(BASE_CELL * 0.8); // 0.8倍 → 42px
-const MIN_CELL = 36;           // 狭い画面での最小値（従来44→36）
+/** セルサイズ（チェック/回数とも同じサイズ・デフォルト46px） */
+const BASE_CELL = 46;          // ← 指定どおり 46px
+const CELL = BASE_CELL;
+const MIN_CELL = 40;           // 狭い画面での最小値（少しだけ縮小を許容）
 const GAP_PX = 8;              // gap-2 相当
 const MAX_COLS = 5;            // 1行最大5つ
 const GRID_WIDTH_PX = MAX_COLS * CELL + (MAX_COLS - 1) * GAP_PX; // 右寄せ用の最大幅
@@ -32,6 +33,7 @@ type DayRecord = {
   notesOther?: string;
   sets: Record<string, boolean[]>;
   counts?: Record<string, number[]>;
+  /** 各セットの「正の入力（チェックON or 回数>0）」のISO時刻 */
   times?: Record<string, (string | null)[]>;
 };
 
@@ -339,7 +341,7 @@ export default function RecordTab() {
                     </div>
                   </div>
 
-                  {/* 2行目：右寄せ 5列グリッド */}
+                  {/* 2行目：右寄せ 5列グリッド（セルは box-border で崩れ防止） */}
                   <div className="mt-2 ml-auto" style={gridContainerStyle}>
                     {mode === "count" ? (
                       <div
@@ -355,7 +357,7 @@ export default function RecordTab() {
                               onValueChange={(v) => changeCount(ex.id, idx, v)}
                             >
                               <SelectTrigger
-                                className="text-base px-1 rounded-md border"
+                                className="box-border text-base px-1 rounded-md border text-center leading-none"
                                 style={{ width: "var(--cell)", height: "var(--cell)" }}
                               >
                                 <SelectValue />
@@ -379,14 +381,14 @@ export default function RecordTab() {
                         {Array.from({ length: setCount }).map((_, idx) => (
                           <div
                             key={idx}
-                            className="flex items-center justify-center rounded-md"
+                            className="flex items-center justify-center rounded-md box-border"
                             style={{ width: "var(--cell)", height: "var(--cell)" }}
                           >
                             <Checkbox
                               checked={dayRecord.sets?.[ex.id]?.[idx] || false}
                               onCheckedChange={() => toggleSet(ex.id, idx)}
                               className={[
-                                "rounded-md border-2",
+                                "box-border rounded-md border-2",
                                 "data-[state=checked]:[&_svg]:scale-[1.5]",
                                 "[&_svg]:transition-transform",
                               ].join(" ")}
