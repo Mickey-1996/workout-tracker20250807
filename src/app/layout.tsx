@@ -2,6 +2,7 @@
 import "../styles/globals.css";
 import { Inter } from "next/font/google";
 import Link from "next/link";
+import Image from "next/image"; // ← 追加
 import type { ReactNode } from "react";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -10,7 +11,7 @@ export const metadata = {
   title: "筋トレ記録アプリ",
   description: "トレーニング内容の記録・集計・設定管理ができるアプリ",
   applicationName: "筋トレ記録アプリ",
-  themeColor: "#0ea5e9", // iOS/Android UIの色
+  themeColor: "#0ea5e9",
   icons: {
     icon: [
       { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
@@ -19,9 +20,7 @@ export const metadata = {
     ],
     apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
   },
-  // /public/site.webmanifest を用意済みの想定
   manifest: "/site.webmanifest",
-  // iOS のホーム追加向けメタ
   appleWebApp: {
     capable: true,
     title: "筋トレ記録アプリ",
@@ -34,16 +33,31 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="ja">
       <body className={`${inter.className} antialiased`}>
-        <header className="p-4 border-b shadow-sm bg-white flex gap-4">
-          <Link href="/" className="font-bold hover:underline">
-            記録
+        <header className="p-4 border-b shadow-sm bg-white flex items-center gap-4">
+          {/* ← アイコンを追加（ホームにリンク） */}
+          <Link href="/" className="shrink-0" aria-label="トップへ">
+            <Image
+              src="/android-chrome-192x192.png"
+              alt="アプリアイコン"
+              width={28}
+              height={28}
+              className="rounded-md"
+              priority
+            />
           </Link>
-          <Link href="/tabs/summary" className="font-bold hover:underline">
-            集計
-          </Link>
-          <Link href="/tabs/settings" className="font-bold hover:underline">
-            設定
-          </Link>
+
+          {/* ナビゲーション */}
+          <nav className="flex gap-4">
+            <Link href="/" className="font-bold hover:underline">
+              記録
+            </Link>
+            <Link href="/tabs/summary" className="font-bold hover:underline">
+              集計
+            </Link>
+            <Link href="/tabs/settings" className="font-bold hover:underline">
+              設定
+            </Link>
+          </nav>
         </header>
         <main className="p-4">{children}</main>
       </body>
