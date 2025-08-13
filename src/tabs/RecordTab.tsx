@@ -18,7 +18,7 @@ const MEMO_EXAMPLE = "（例）アーチャープッシュアップも10回や�
 
 /* ====== レイアウト定数 ====== */
 const CELL = 50;        // セルの基準サイズ（px）
-const GAP = 8;          // gap-2 相当（必要なら微調整）
+const GAP = 8;          // gap-2 相当
 const MAX_COLS = 5;     // 1 行の最大個数
 const COUNT_MAX = 99;   // 回数プルダウンの上限
 /* ========================== */
@@ -65,19 +65,14 @@ type DayRecord = {
   times?: Record<string, (string | null)[]>;
 };
 
-/* ====== ここから “端末ローカル時間” 版 ====== */
-// 端末ローカルの YYYY-MM-DD を返す
+/* ====== 端末ローカル時間で “今日” を扱う ====== */
 const ymdLocal = (d: Date) => {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const da = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${da}`;
 };
-
-// 「今日」の判定にローカル日付を使う
 const todayStr = ymdLocal(new Date());
-
-// ローカル日付で同日判定
 const isSameDay = (iso?: string, ymd?: string) =>
   iso && ymd ? ymdLocal(new Date(iso)) === ymd : false;
 /* =========================================== */
@@ -102,7 +97,7 @@ const KEY_PREV = "last-done-prev-v1";
 type LastDoneMap = Record<string, string>;
 type LastPrevMap = Record<string, string | undefined>;
 
-/** カレンダーアイコン（数値は表示しない） */
+/** カレンダーアイコン（数値は出さない） */
 function CalendarIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -193,7 +188,7 @@ export default function RecordTab() {
     const v0 = loadJSON<LastDoneMap>(KEY_V0);
     const alt = loadJSON<LastDoneMap>(KEY_ALT);
     setLastDone(v1 ?? v0 ?? alt ?? {});
-    setLastPrev(loadJSON<LastPrevMap>(KEY_PREV) ?? {};
+    setLastPrev(loadJSON<LastPrevMap>(KEY_PREV) ?? {});
   }, []);
 
   const writeLastAll = (map: LastDoneMap, prev: LastPrevMap) => {
