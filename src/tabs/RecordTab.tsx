@@ -1,4 +1,3 @@
-// src/tabs/RecordTab.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -19,11 +18,10 @@ const MEMO_EXAMPLE = "（例）アーチャープッシュアップも10回や�
 /* ================================================ */
 
 /** セルサイズ（チェック/回数とも同じサイズ・デフォルト46px） */
-const BASE_CELL = 46;          // ← 指定どおり 46px
-const CELL = BASE_CELL;
-const MIN_CELL = 40;           // 狭い画面での最小値（少しだけ縮小を許容）
-const GAP_PX = 8;              // gap-2 相当
-const MAX_COLS = 5;            // 1行最大5つ
+const CELL = 46;              // 既定サイズ
+const MIN_CELL = 40;          // 狭い画面での最小サイズ（わずかに自動縮小を許容）
+const GAP_PX = 8;             // gap-2 相当
+const MAX_COLS = 5;           // 1行最大5つ
 const GRID_WIDTH_PX = MAX_COLS * CELL + (MAX_COLS - 1) * GAP_PX; // 右寄せ用の最大幅
 
 type DayRecord = {
@@ -33,7 +31,7 @@ type DayRecord = {
   notesOther?: string;
   sets: Record<string, boolean[]>;
   counts?: Record<string, number[]>;
-  /** 各セットの「正の入力（チェックON or 回数>0）」のISO時刻 */
+  /** 各セットの「正の入力（チェックON or 回数>0）」時刻 */
   times?: Record<string, (string | null)[]>;
 };
 
@@ -301,7 +299,7 @@ export default function RecordTab() {
     width: `min(100%, ${GRID_WIDTH_PX}px)`,
     ["--gap" as any]: `${GAP_PX}px`,
     ["--cell" as any]: `max(${MIN_CELL}px, calc((100% - ${(MAX_COLS - 1)} * var(--gap)) / ${MAX_COLS}))`,
-  } as any;
+  } as React.CSSProperties;
 
   return (
     <div className="space-y-4">
@@ -341,7 +339,7 @@ export default function RecordTab() {
                     </div>
                   </div>
 
-                  {/* 2行目：右寄せ 5列グリッド（セルは box-border で崩れ防止） */}
+                  {/* 2行目：右寄せ 5列グリッド（セルは box-border + min-w-0 で崩れ防止） */}
                   <div className="mt-2 ml-auto" style={gridContainerStyle}>
                     {mode === "count" ? (
                       <div
@@ -357,7 +355,7 @@ export default function RecordTab() {
                               onValueChange={(v) => changeCount(ex.id, idx, v)}
                             >
                               <SelectTrigger
-                                className="box-border text-base px-1 rounded-md border text-center leading-none"
+                                className="box-border min-w-0 text-base px-0 rounded-md border text-center leading-none justify-center"
                                 style={{ width: "var(--cell)", height: "var(--cell)" }}
                               >
                                 <SelectValue />
@@ -381,7 +379,7 @@ export default function RecordTab() {
                         {Array.from({ length: setCount }).map((_, idx) => (
                           <div
                             key={idx}
-                            className="flex items-center justify-center rounded-md box-border"
+                            className="flex items-center justify-center rounded-md box-border min-w-0"
                             style={{ width: "var(--cell)", height: "var(--cell)" }}
                           >
                             <Checkbox
