@@ -13,35 +13,19 @@ import {
 } from "@/components/ui/Select";
 import { loadDayRecord, saveDayRecord, loadJSON } from "@/lib/local-storage";
 
-/* ========= メモ欄の記述例（全カテゴリ共通） ========= */
+/* メモ欄の記述例（全カテゴリ共通） */
 const MEMO_EXAMPLE = "（例）アーチャープッシュアップも10回やった";
-/* ================================================ */
 
-/** セルサイズ（チェック/回数とも同じサイズ・デフォルト46px） */
-const CELL = 46;              // 既定サイズ
-const MIN_CELL = 40;          // 狭い画面での最小サイズ（わずかに自動縮小を許容）
-const GAP_PX = 8;             // gap-2 相当
-const MAX_COLS = 5;           // 1行最大5つ
-const GRID_WIDTH_PX = MAX_COLS * CELL + (MAX_COLS - 1) * GAP_PX; // 右寄せ用の最大幅
-
-type DayRecord = {
-  date: string;
-  notesUpper?: string;
-  notesLower?: string;
-  notesOther?: string;
-  sets: Record<string, boolean[]>;
-  counts?: Record<string, number[]>;
-  /** 各セットの「正の入力（チェックON or 回数>0）」時刻 */
-  times?: Record<string, (string | null)[]>;
-};
-
-type ExercisesState = Record<
-  string,
-  { id: string; name: string; sets: number }[]
->;
+/* ====== レイアウト定数 ====== */
+const CELL = 50;        // セルの基準サイズ（px）
+const GAP = 8;          // gap-2 相当
+const MAX_COLS = 5;     // 1 行の最大個数
+const COUNT_MAX = 99;   // 回数プルダウンの上限
+/* ========================== */
 
 type Category = "upper" | "lower" | "other";
 type InputMode = "check" | "count";
+
 type Settings = {
   items: Array<{
     id: string;
@@ -65,6 +49,22 @@ type MetaMap = Record<
   }
 >;
 
+type ExercisesState = Record<
+  string,
+  { id: string; name: string; sets: number }[]
+>;
+
+type DayRecord = {
+  date: string;
+  notesUpper?: string;
+  notesLower?: string;
+  notesOther?: string;
+  sets: Record<string, boolean[]>;
+  counts?: Record<string, number[]>;
+  /** 各セットの「正の入力（チェックON or 回数>0）」時刻 */
+  times?: Record<string, (string | null)[]>;
+};
+
 const todayStr = new Date().toISOString().split("T")[0];
 const fmtDateJP = (iso: string) => {
   const [y, m, d] = iso.split("-").map(Number);
@@ -83,18 +83,15 @@ const isSameDay = (iso?: string, ymd?: string) => {
   return iso.slice(0, 10) === ymd;
 };
 
-// 互換キー
+// 互換キー（前回実施保存用）
 const KEY_V1 = "last-done-v1";
 const KEY_V0 = "last-done";
 const KEY_ALT = "lastDone";
 const KEY_PREV = "last-done-prev-v1";
-
 type LastDoneMap = Record<string, string>;
 type LastPrevMap = Record<string, string | undefined>;
 
-const COUNT_MAX = 99;
-
-/** 小さなカレンダーアイコン（絵文字依存回避） */
+/** 小さめのカレンダーアイコン（数値は表示しない） */
 function CalendarIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -177,7 +174,7 @@ export default function RecordTab() {
     (saveDayRecord as any)(todayStr, rec);
   };
 
-  /* 最終実施 */
+  /* 最終実施（前回） */
   const [lastDone, setLastDone] = useState<LastDoneMap>({});
   const [lastPrev, setLastPrev] = useState<LastPrevMap>({});
   useEffect(() => {
@@ -272,14 +269,12 @@ export default function RecordTab() {
     recomputeAndSyncLastDone(exerciseId, next);
   };
 
-  /* メモ欄 */
   const handleCatNotesChange = (cat: Category, value: string) => {
     if (cat === "upper") return persist({ ...dayRecord, notesUpper: value ?? "" });
     if (cat === "lower") return persist({ ...dayRecord, notesLower: value ?? "" });
     return persist({ ...dayRecord, notesOther: value ?? "" });
   };
 
-  /* ラベル */
   const recoveryText = (exerciseId: string) => {
     const h = hoursSince(lastDone[exerciseId]);
     if (h == null) return "—";
@@ -293,13 +288,6 @@ export default function RecordTab() {
 
   const catLabel = (c: string) =>
     c === "upper" ? "上半身" : c === "lower" ? "下半身" : "その他";
-
-  // 右寄せエリア：幅は 5列分、セルは CSS 変数で制御（自動で少し縮む）
-  const gridContainerStyle = {
-    width: `min(100%, ${GRID_WIDTH_PX}px)`,
-    ["--gap" as any]: `${GAP_PX}px`,
-    ["--cell" as any]: `max(${MIN_CELL}px, calc((100% - ${(MAX_COLS - 1)} * var(--gap)) / ${MAX_COLS}))`,
-  } as React.CSSProperties;
 
   return (
     <div className="space-y-4">
@@ -328,10 +316,11 @@ export default function RecordTab() {
               const m = meta[ex.id] ?? { mode: "check" as InputMode, setCount: ex.sets ?? 3 };
               const setCount = Math.max(1, m.setCount ?? ex.sets ?? 3);
               const mode = m.mode ?? "check";
+              const cols = Math.min(MAX_COLS, setCount); // 1 行のカラム数
 
               return (
                 <div key={ex.id} className="mb-4">
-                  {/* 1行目：種目名 + インターバル */}
+                  {/* 1 行目：種目名 + インターバル（テキスト行） */}
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                     <div className="font-medium text-sm">{ex.name}</div>
                     <div className="ml-auto w-full sm:w-auto text-sm text-slate-500 text-right">
@@ -339,12 +328,14 @@ export default function RecordTab() {
                     </div>
                   </div>
 
-                  {/* 2行目：右寄せ 5列グリッド（セルは box-border + min-w-0 で崩れ防止） */}
-                  <div className="mt-2 ml-auto" style={gridContainerStyle}>
+                  {/* 2 行目：右寄せセル群（inline-grid で幅=内容、確実に 1 行最大 5 個） */}
+                  <div className="mt-2 flex justify-end">
                     {mode === "count" ? (
                       <div
-                        className="grid gap-2"
-                        style={{ gridTemplateColumns: `repeat(${MAX_COLS}, var(--cell))` }}
+                        className="inline-grid gap-2"
+                        style={{
+                          gridTemplateColumns: `repeat(${cols}, ${CELL}px)`,
+                        }}
                       >
                         {Array.from({ length: setCount }).map((_, idx) => {
                           const cur = dayRecord.counts?.[ex.id]?.[idx] ?? 0;
@@ -355,8 +346,8 @@ export default function RecordTab() {
                               onValueChange={(v) => changeCount(ex.id, idx, v)}
                             >
                               <SelectTrigger
-                                className="box-border min-w-0 text-base px-0 rounded-md border text-center leading-none justify-center"
-                                style={{ width: "var(--cell)", height: "var(--cell)" }}
+                                className="rounded-md border px-0 text-center leading-none justify-center"
+                                style={{ width: CELL, height: CELL }}
                               >
                                 <SelectValue />
                               </SelectTrigger>
@@ -373,26 +364,19 @@ export default function RecordTab() {
                       </div>
                     ) : (
                       <div
-                        className="grid gap-2"
-                        style={{ gridTemplateColumns: `repeat(${MAX_COLS}, var(--cell))` }}
+                        className="inline-grid gap-2 place-items-center"
+                        style={{
+                          gridTemplateColumns: `repeat(${cols}, ${CELL}px)`,
+                        }}
                       >
                         {Array.from({ length: setCount }).map((_, idx) => (
-                          <div
+                          <Checkbox
                             key={idx}
-                            className="flex items-center justify-center rounded-md box-border min-w-0"
-                            style={{ width: "var(--cell)", height: "var(--cell)" }}
-                          >
-                            <Checkbox
-                              checked={dayRecord.sets?.[ex.id]?.[idx] || false}
-                              onCheckedChange={() => toggleSet(ex.id, idx)}
-                              className={[
-                                "box-border rounded-md border-2",
-                                "data-[state=checked]:[&_svg]:scale-[1.5]",
-                                "[&_svg]:transition-transform",
-                              ].join(" ")}
-                              style={{ width: "var(--cell)", height: "var(--cell)" }}
-                            />
-                          </div>
+                            checked={dayRecord.sets?.[ex.id]?.[idx] || false}
+                            onCheckedChange={() => toggleSet(ex.id, idx)}
+                            className="rounded-md border-2 data-[state=checked]:[&_svg]:scale-[1.5] [&_svg]:transition-transform"
+                            style={{ width: CELL, height: CELL }}
+                          />
                         ))}
                       </div>
                     )}
