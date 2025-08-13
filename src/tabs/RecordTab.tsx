@@ -19,9 +19,11 @@ const MEMO_EXAMPLE = "（例）アーチャープッシュアップも10回や�
 /* ================================================ */
 
 /** セルサイズ／行幅（回数入力とチェックを揃える） */
-const CELL_H = "h-10";          // 40px
-const CELL_W = "w-10";          // 40px（回数表示は2桁想定）
-const GRID_W = "w-[136px]";     // 3セル(3*40) + ギャップ(2*8) = 136px
+const CELL_SIZE = 52; // px（約1.3倍）
+const CELL_H = `h-[${CELL_SIZE}px]`;
+const CELL_W = `w-[${CELL_SIZE}px]`;
+const GAP = 8; // Tailwind gap-2 の実寸
+const GRID_W = `w-[${3 * CELL_SIZE + 2 * GAP}px]`; // 3セル＋2ギャップ＝右寄せの幅
 
 type DayRecord = {
   date: string;
@@ -141,10 +143,11 @@ export default function RecordTab() {
 
   const persist = (rec: DayRecord) => {
     setDayRecord(rec);
-    (saveDayRecord as any)(todayStr, rec); // 型衝突回避
+    // 型差異を避けるため any
+    (saveDayRecord as any)(todayStr, rec);
   };
 
-  // 最終実施
+  // 最終実施（インターバル表示用）
   const [lastDone, setLastDone] = useState<LastDoneMap>({});
   useEffect(() => {
     const map = loadJSON<LastDoneMap>(LAST_DONE_KEY) ?? {};
@@ -240,10 +243,10 @@ export default function RecordTab() {
 
               return (
                 <div key={ex.id} className="mb-4">
-                  {/* 1行目：種目名 + インターバル */}
-                  <div className="flex flex-wrap items-baseline gap-2">
+                  {/* 1行目：種目名 + インターバル（常に表示・折返し時は右寄せで2行目へ） */}
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                     <div className="font-medium text-sm">{ex.name}</div>
-                    <div className="ml-auto text-sm text-slate-500">
+                    <div className="ml-auto w-full sm:w-auto text-sm text-slate-500 text-right">
                       前回からのインターバル：{recoveryText(ex.id)}
                     </div>
                   </div>
@@ -260,7 +263,7 @@ export default function RecordTab() {
                               value={String(cur)}
                               onValueChange={(v) => changeCount(ex.id, idx, v)}
                             >
-                              <SelectTrigger className={`${CELL_H} ${CELL_W} text-xs px-1`}>
+                              <SelectTrigger className={`${CELL_H} ${CELL_W} text-base px-1`}>
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent className="max-h-64">
@@ -277,11 +280,22 @@ export default function RecordTab() {
                     ) : (
                       <div className="grid grid-cols-3 gap-2">
                         {Array.from({ length: setCount }).map((_, idx) => (
-                          <div key={idx} className={`flex items-center justify-center ${CELL_H} ${CELL_W}`}>
+                          <div
+                            key={idx}
+                            className={`flex items-center justify-center ${CELL_H} ${CELL_W}`}
+                          >
                             <Checkbox
                               checked={dayRecord.sets?.[ex.id]?.[idx] || false}
                               onCheckedChange={() => toggleSet(ex.id, idx)}
-                              className={`${CELL_H} ${CELL_W}`}
+                              // ボックスを1.3倍、チェックマークは約1.5倍に
+                              className={[
+                                CELL_H,
+                                CELL_W,
+                                "rounded-md",
+                                // チェックアイコンの拡大（shadcn/uiの内部SVGを対象）
+                                "data-[state=checked]:[&_svg]:scale-[1.5]",
+                                "[&_svg]:transition-transform",
+                              ].join(" ")}
                             />
                           </div>
                         ))}
