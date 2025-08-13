@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <style>
+      .bg { fill: #2563eb; }
+      .fg { fill: #ffffff; }
+    </style>
+  </defs>
+  <circle class="bg" cx="256" cy="256" r="256"/>
+  <!-- dumbbell -->
+  <rect class="fg" x="134" y="230" width="244" height="52" rx="26"/>
+  <rect class="fg" x="96"  y="208" width="36" height="96" rx="18"/>
+  <rect class="fg" x="58"  y="208" width="36" height="96" rx="18"/>
+  <rect class="fg" x="380" y="208" width="36" height="96" rx="18"/>
+  <rect class="fg" x="418" y="208" width="36" height="96" rx="18"/>
+</svg>
