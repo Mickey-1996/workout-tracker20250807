@@ -43,11 +43,6 @@ const ymdLocal = (d: Date) => {
   return `${y}-${m}-${da}`;
 };
 
-const isSameDayLocal = (a: Date, b: Date) =>
-  a.getFullYear() === b.getFullYear() &&
-  a.getMonth() === b.getMonth() &&
-  a.getDate() === b.getDate();
-
 /* 月内の全日付配列（ローカル時間） */
 const getMonthDates = (month: Date) => {
   const y = month.getFullYear();
@@ -64,7 +59,6 @@ const getMonthDates = (month: Date) => {
 /* 記録があるかの判定（当該日の DayRecord に何か入っているか） */
 const hasAnyRecord = (rec: Partial<DayRecord> | null | undefined) => {
   if (!rec) return false;
-  // メモ・チェック・回数のいずれかが存在
   if (rec.notesUpper || rec.notesLower || rec.notesOther) return true;
   if (rec.sets) {
     for (const arr of Object.values(rec.sets)) {
@@ -105,7 +99,7 @@ function TinyCount({ n }: { n: number }) {
   );
 }
 
-/* 選択日の属する週（Mon-Sun）の開始/終了（ローカル） */
+/* 週（Mon-Sun）配列を返す */
 const startOfWeekMon = (d: Date) => {
   const day = d.getDay(); // 0:Sun ... 6:Sat
   const diff = (day + 6) % 7; // Mon=0
@@ -122,7 +116,7 @@ export default function SummaryTab() {
   const [month, setMonth] = useState<Date>(new Date(today.getFullYear(), today.getMonth(), 1));
   const [selectedDate, setSelectedDate] = useState<Date>(today);
 
-  /* 設定（順序反映のために利用） */
+  /* 設定（順序反映のため） */
   const [items, setItems] = useState<SettingsItem[]>([]);
   useEffect(() => {
     const s = loadJSON<Settings>("settings-v1");
@@ -130,7 +124,7 @@ export default function SummaryTab() {
     setItems(enabled.sort(sortByOrder));
   }, []);
 
-  /* 月内の「記録あり」日付を取得（loadDayRecord を日ごと呼ぶ） */
+  /* 月内の「記録あり」日付 */
   const daysWithRecord = useMemo(() => {
     const days = getMonthDates(month);
     const acc: Date[] = [];
@@ -141,7 +135,7 @@ export default function SummaryTab() {
     return acc;
   }, [month]);
 
-  /* 選択日の記録を取得 */
+  /* 選択日の記録 */
   const [selectedRecord, setSelectedRecord] = useState<Partial<DayRecord> | null>(null);
   useEffect(() => {
     if (!selectedDate) {
@@ -152,37 +146,47 @@ export default function SummaryTab() {
     setSelectedRecord(rec ?? null);
   }, [selectedDate]);
 
-  /* 週合計（選択日の属する週） */
-  const weekAgg = useMemo(() => {
+  /* 週合計（種目別）：選択日の属する週 */
+  const weekAggByItem = useMemo(() => {
     const days = weekDatesMonSun(selectedDate);
-    let countSum = 0;
-    let setSum = 0;
+    const byId = new Map<string, { id: string; name: string; category: Category; setSum: number; countSum: number }>();
+    for (const it of items) {
+      byId.set(it.id, { id: it.id, name: it.name, category: it.category, setSum: 0, countSum: 0 });
+    }
     for (const d of days) {
       const rec = loadDayRecord(ymdLocal(d)) as Partial<DayRecord> | null;
       if (!rec) continue;
+      // counts
       if (rec.counts) {
-        for (const arr of Object.values(rec.counts)) {
-          if (!arr) continue;
-          for (const n of arr) countSum += Math.max(0, Number(n ?? 0));
+        for (const [id, arr] of Object.entries(rec.counts)) {
+          const row = byId.get(id);
+          if (!row || !arr) continue;
+          for (const n of arr) row.countSum += Math.max(0, Number(n ?? 0));
         }
       }
+      // sets
       if (rec.sets) {
-        for (const arr of Object.values(rec.sets)) {
-          if (!arr) continue;
-          for (const v of arr) setSum += v ? 1 : 0;
+        for (const [id, arr] of Object.entries(rec.sets)) {
+          const row = byId.get(id);
+          if (!row || !arr) continue;
+          for (const v of arr) row.setSum += v ? 1 : 0;
         }
       }
     }
+    // 0だけの行は非表示に（必要ならこの filter を外せば全種目表示）
+    const rows = Array.from(byId.values()).filter((r) => r.countSum > 0 || r.setSum > 0);
+    // 表示順は設定順
+    const orderIndex = new Map(items.map((it, i) => [it.id, i]));
+    rows.sort((a, b) => (orderIndex.get(a.id)! - orderIndex.get(b.id)!));
     const start = days[0];
     const end = days[6];
     return {
       rangeLabel: `${ymdLocal(start)} 〜 ${ymdLocal(end)}`,
-      countSum,
-      setSum,
+      rows,
     };
-  }, [selectedDate]);
+  }, [selectedDate, items]);
 
-  /* DayPicker の見た目（◯で囲む：小さめ） */
+  /* DayPicker の見た目（◯：小さめ） */
   const dayPickerStyles: Partial<Record<string, CSSProperties>> = {
     root: { ["--rdp-cell-size" as any]: "50px" } as CSSProperties,
     head_cell: { fontSize: "12px", color: "rgb(100 116 139)" },
@@ -212,9 +216,8 @@ export default function SummaryTab() {
             recorded: daysWithRecord,
             today: today,
           }}
-          /* ▼ 記録あり：◯（小さめ） */
+          /* 記録あり：◯（小さめ） */
           modifiersClassNames={{
-            // relative + after: 擬似要素で小さめリングを描画
             recorded:
               "relative after:content-[''] after:absolute after:inset-[7px] after:rounded-full after:ring-2 after:ring-emerald-500 after:ring-offset-2 after:ring-offset-white dark:after:ring-offset-slate-900",
             selected: "bg-emerald-500 text-white hover:bg-emerald-600",
@@ -227,7 +230,6 @@ export default function SummaryTab() {
         {/* 凡例 */}
         <div className="mt-3 flex items-center gap-4 text-xs text-slate-600">
           <div className="flex items-center gap-1">
-            {/* ◯（小）のプレビュー */}
             <span className="relative inline-block w-4 h-4">
               <span className="absolute inset-[2px] rounded-full ring-2 ring-emerald-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-900" />
             </span>
@@ -240,24 +242,6 @@ export default function SummaryTab() {
           <div className="flex items-center gap-1">
             <span className="inline-block w-4 h-4 rounded-sm bg-emerald-500" />
             選択日
-          </div>
-        </div>
-      </Card>
-
-      {/* 週合計（選択日の属する週） */}
-      <Card className="p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-base font-semibold">週合計（選択日の属する週）</h2>
-          <div className="text-sm text-slate-500">{weekAgg.rangeLabel}</div>
-        </div>
-        <div className="grid grid-cols-2 gap-3 sm:max-w-sm">
-          <div className="rounded-lg border p-3">
-            <div className="text-xs text-slate-500">回数 合計</div>
-            <div className="text-2xl font-bold">{weekAgg.countSum}</div>
-          </div>
-          <div className="rounded-lg border p-3">
-            <div className="text-xs text-slate-500">セット 合計</div>
-            <div className="text-2xl font-bold">{weekAgg.setSum}</div>
           </div>
         </div>
       </Card>
@@ -345,6 +329,39 @@ export default function SummaryTab() {
                 </section>
               );
             })}
+          </div>
+        )}
+      </Card>
+
+      {/* ▼ 一番下：週合計（種目別） */}
+      <Card className="p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-base font-semibold">週合計（種目別）</h2>
+          <div className="text-sm text-slate-500">{weekAggByItem.rangeLabel}</div>
+        </div>
+
+        {weekAggByItem.rows.length === 0 ? (
+          <div className="text-sm text-slate-500">この週の記録はありません。</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-slate-500">
+                  <th className="py-2 pr-3 font-medium">種目</th>
+                  <th className="py-2 pr-3 font-medium text-right">セット合計</th>
+                  <th className="py-2 pr-3 font-medium text-right">回数合計</th>
+                </tr>
+              </thead>
+              <tbody>
+                {weekAggByItem.rows.map((r) => (
+                  <tr key={r.id} className="border-t">
+                    <td className="py-2 pr-3">{r.name}</td>
+                    <td className="py-2 pr-3 text-right">{r.setSum}</td>
+                    <td className="py-2 pr-3 text-right">{r.countSum}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </Card>
