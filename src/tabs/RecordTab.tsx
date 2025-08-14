@@ -18,7 +18,7 @@ const MEMO_EXAMPLE = "（例）アーチャープッシュアップも10回や�
 
 /* ====== レイアウト定数 ====== */
 const CELL = 50;        // セルの基準サイズ（px）
-const GAP = 8;          // gap-2 相当
+const GAP = 8;          // gap-2 相当（未使用だが基準として残置）
 const MAX_COLS = 5;     // 1 行の最大個数
 const COUNT_MAX = 99;   // 回数プルダウンの上限
 /* ========================== */
@@ -116,12 +116,17 @@ function CalendarIcon({ className }: { className?: string }) {
   );
 }
 
+/** order 昇順（同値時は名前）で安定ソート */
+const sortByOrder = <T extends { order?: number; name?: string }>(a: T, b: T) =>
+  (a.order ?? 0) - (b.order ?? 0) || (a.name ?? "").localeCompare(b.name ?? "");
+
 export default function RecordTab() {
-  /* 設定→メタ */
+  /* 設定→メタ（※ここで items を order でソート） */
   const [meta, setMeta] = useState<MetaMap>({});
   useEffect(() => {
     const settings = loadJSON<Settings>("settings-v1");
-    const items = settings?.items?.filter((x) => x.enabled !== false) ?? [];
+    const items =
+      settings?.items?.filter((x) => x.enabled !== false).sort(sortByOrder) ?? [];
     const m: MetaMap = {};
     for (const it of items) {
       const mode: InputMode = it.inputMode ?? "check";
@@ -131,12 +136,13 @@ export default function RecordTab() {
     setMeta(m);
   }, []);
 
-  /* カテゴリ配列 */
+  /* カテゴリ配列（※こちらも order でソートしてから詰める） */
   const [exercises, setExercises] = useState<ExercisesState | null>(null);
   useEffect(() => {
     if (Object.keys(meta).length === 0) return;
     const settings = loadJSON<Settings>("settings-v1");
-    const items = settings?.items?.filter((x) => x.enabled !== false) ?? [];
+    const items =
+      settings?.items?.filter((x) => x.enabled !== false).sort(sortByOrder) ?? [];
     const grouped: ExercisesState = { upper: [], lower: [], other: [] } as any;
     for (const it of items) {
       const setCount = meta[it.id]?.setCount ?? it.sets ?? 3;
