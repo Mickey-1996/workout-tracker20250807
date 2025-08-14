@@ -105,6 +105,17 @@ function TinyCount({ n }: { n: number }) {
   );
 }
 
+/* 選択日の属する週（Mon-Sun）の開始/終了（ローカル） */
+const startOfWeekMon = (d: Date) => {
+  const day = d.getDay(); // 0:Sun ... 6:Sat
+  const diff = (day + 6) % 7; // Mon=0
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() - diff);
+};
+const weekDatesMonSun = (d: Date) => {
+  const start = startOfWeekMon(d);
+  return Array.from({ length: 7 }, (_, i) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + i));
+};
+
 export default function SummaryTab() {
   /* 月/選択日（ローカル時間） */
   const today = useMemo(() => new Date(), []);
@@ -141,9 +152,38 @@ export default function SummaryTab() {
     setSelectedRecord(rec ?? null);
   }, [selectedDate]);
 
-  /* DayPicker の見た目（◯で囲む） */
+  /* 週合計（選択日の属する週） */
+  const weekAgg = useMemo(() => {
+    const days = weekDatesMonSun(selectedDate);
+    let countSum = 0;
+    let setSum = 0;
+    for (const d of days) {
+      const rec = loadDayRecord(ymdLocal(d)) as Partial<DayRecord> | null;
+      if (!rec) continue;
+      if (rec.counts) {
+        for (const arr of Object.values(rec.counts)) {
+          if (!arr) continue;
+          for (const n of arr) countSum += Math.max(0, Number(n ?? 0));
+        }
+      }
+      if (rec.sets) {
+        for (const arr of Object.values(rec.sets)) {
+          if (!arr) continue;
+          for (const v of arr) setSum += v ? 1 : 0;
+        }
+      }
+    }
+    const start = days[0];
+    const end = days[6];
+    return {
+      rangeLabel: `${ymdLocal(start)} 〜 ${ymdLocal(end)}`,
+      countSum,
+      setSum,
+    };
+  }, [selectedDate]);
+
+  /* DayPicker の見た目（◯で囲む：小さめ） */
   const dayPickerStyles: Partial<Record<string, CSSProperties>> = {
-    // セルサイズを大きめに
     root: { ["--rdp-cell-size" as any]: "50px" } as CSSProperties,
     head_cell: { fontSize: "12px", color: "rgb(100 116 139)" },
     day: { margin: 2 },
@@ -151,6 +191,7 @@ export default function SummaryTab() {
 
   return (
     <div className="space-y-6">
+      {/* カレンダー */}
       <Card className="p-4">
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-base font-semibold">カレンダー</h2>
@@ -171,10 +212,11 @@ export default function SummaryTab() {
             recorded: daysWithRecord,
             today: today,
           }}
-          /* 記録あり＝◯で囲む */
+          /* ▼ 記録あり：◯（小さめ） */
           modifiersClassNames={{
+            // relative + after: 擬似要素で小さめリングを描画
             recorded:
-              "ring-2 ring-emerald-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-900 rounded-full",
+              "relative after:content-[''] after:absolute after:inset-[7px] after:rounded-full after:ring-2 after:ring-emerald-500 after:ring-offset-2 after:ring-offset-white dark:after:ring-offset-slate-900",
             selected: "bg-emerald-500 text-white hover:bg-emerald-600",
             today: "ring-2 ring-emerald-400",
             outside: "text-slate-300",
@@ -185,7 +227,10 @@ export default function SummaryTab() {
         {/* 凡例 */}
         <div className="mt-3 flex items-center gap-4 text-xs text-slate-600">
           <div className="flex items-center gap-1">
-            <span className="inline-block w-4 h-4 rounded-full ring-2 ring-emerald-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-900" />
+            {/* ◯（小）のプレビュー */}
+            <span className="relative inline-block w-4 h-4">
+              <span className="absolute inset-[2px] rounded-full ring-2 ring-emerald-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-900" />
+            </span>
             記録あり
           </div>
           <div className="flex items-center gap-1">
@@ -199,6 +244,25 @@ export default function SummaryTab() {
         </div>
       </Card>
 
+      {/* 週合計（選択日の属する週） */}
+      <Card className="p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-base font-semibold">週合計（選択日の属する週）</h2>
+          <div className="text-sm text-slate-500">{weekAgg.rangeLabel}</div>
+        </div>
+        <div className="grid grid-cols-2 gap-3 sm:max-w-sm">
+          <div className="rounded-lg border p-3">
+            <div className="text-xs text-slate-500">回数 合計</div>
+            <div className="text-2xl font-bold">{weekAgg.countSum}</div>
+          </div>
+          <div className="rounded-lg border p-3">
+            <div className="text-xs text-slate-500">セット 合計</div>
+            <div className="text-2xl font-bold">{weekAgg.setSum}</div>
+          </div>
+        </div>
+      </Card>
+
+      {/* 選択日の記録詳細 */}
       <Card className="p-4">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-base font-semibold">選択日の記録</h2>
