@@ -29,6 +29,24 @@ type ExtendedExerciseItem = ExerciseItem & {
 
 type Settings = { items: ExtendedExerciseItem[] };
 
+/* ===== ユーティリティ（順序正規化・比較） ===== */
+const cmpOrderName = (a: ExtendedExerciseItem, b: ExtendedExerciseItem) =>
+  (a.order ?? 0) - (b.order ?? 0) || (a.name ?? "").localeCompare(b.name ?? "");
+
+/** カテゴリごとに order を 1..n で振り直す */
+function normalizeOrders(list: ExtendedExerciseItem[]): ExtendedExerciseItem[] {
+  const out = list.map((x) => ({ ...x })); // 破壊的変更を避ける
+  (["upper", "lower", "other"] as Category[]).forEach((cat) => {
+    const grp = out.filter((x) => x.category === cat).sort(cmpOrderName);
+    grp.forEach((x, i) => {
+      const idx = out.findIndex((y) => y.id === x.id);
+      if (idx >= 0) out[idx] = { ...out[idx], order: i + 1 };
+    });
+  });
+  return out;
+}
+/* ========================================== */
+
 function newItem(cat: Category): ExtendedExerciseItem {
   return {
     id: crypto.randomUUID(),
@@ -38,7 +56,7 @@ function newItem(cat: Category): ExtendedExerciseItem {
     checkCount: 3,
     sets: 3,
     enabled: true,
-    order: 0,
+    order: 0, // 後で normalize される
   };
 }
 
@@ -48,11 +66,9 @@ export default function SettingsTab() {
 
   useEffect(() => {
     const saved = loadJSON<Settings>(SETTINGS_KEY);
-    if (saved?.items?.length) {
-      setItems(saved.items);
-    } else {
-      setItems(defaultExercises as ExtendedExerciseItem[]);
-    }
+    const base =
+      saved?.items?.length ? (saved.items as ExtendedExerciseItem[]) : (defaultExercises as ExtendedExerciseItem[]);
+    setItems(normalizeOrders(base));
     setReady(true);
   }, []);
 
@@ -62,12 +78,10 @@ export default function SettingsTab() {
   }, [items, ready]);
 
   const byCat = useMemo(() => {
-    const sortByOrder = (a: ExtendedExerciseItem, b: ExtendedExerciseItem) =>
-      (a.order ?? 0) - (b.order ?? 0);
     return {
-      upper: items.filter((x) => x.category === "upper").sort(sortByOrder),
-      lower: items.filter((x) => x.category === "lower").sort(sortByOrder),
-      other: items.filter((x) => x.category === "other").sort(sortByOrder),
+      upper: items.filter((x) => x.category === "upper").sort(cmpOrderName),
+      lower: items.filter((x) => x.category === "lower").sort(cmpOrderName),
+      other: items.filter((x) => x.category === "other").sort(cmpOrderName),
     };
   }, [items]);
 
@@ -83,8 +97,9 @@ export default function SettingsTab() {
       return [...prev, item];
     });
 
-  const remove = (id: string) => setItems((prev) => prev.filter((x) => x.id !== id));
+  const remove = (id: string) => setItems((prev) => normalizeOrders(prev.filter((x) => x.id !== id)));
 
+  /** ↑/↓：カテゴリ内で1つ移動し、連動して連番を振り直す */
   const move = (id: string, dir: -1 | 1) =>
     setItems((prev) => {
       const arr = [...prev];
@@ -92,22 +107,23 @@ export default function SettingsTab() {
       if (idx < 0) return prev;
       const cat = arr[idx].category;
 
-      const sameCatIdx = arr
-        .map((x, i) => ({ x, i }))
-        .filter(({ x }) => x.category === cat)
-        .map(({ i }) => i);
+      // 対象カテゴリの並び（現在の order で整列）
+      const catList = arr.filter((x) => x.category === cat).sort(cmpOrderName);
+      const pos = catList.findIndex((x) => x.id === id);
+      const nextPos = pos + dir;
+      if (nextPos < 0 || nextPos >= catList.length) return prev;
 
-      const posInCat = sameCatIdx.indexOf(idx);
-      const nextPos = posInCat + dir;
-      if (nextPos < 0 || nextPos >= sameCatIdx.length) return prev;
+      // 1つ移動
+      const moved = catList.splice(pos, 1)[0];
+      catList.splice(nextPos, 0, moved);
 
-      const j = sameCatIdx[nextPos];
-      const a = arr[idx];
-      const b = arr[j];
-      const tmp = a.order ?? 0;
-      a.order = b.order ?? 0;
-      b.order = tmp;
-      return arr.slice();
+      // 連番を再付与
+      catList.forEach((x, i) => {
+        const k = arr.findIndex((y) => y.id === x.id);
+        if (k >= 0) arr[k] = { ...arr[k], order: i + 1 };
+      });
+
+      return arr;
     });
 
   const Block = (cat: Category, title: string) => {
