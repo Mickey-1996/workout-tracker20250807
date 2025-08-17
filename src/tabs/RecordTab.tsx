@@ -47,7 +47,7 @@ function makeSetArray(n: number): number[] {
   return Array.from({ length: c }, (_, i) => i);
 }
 
-// iOS Safari：アンカーでJSONダウンロード（通常は「ダウンロード」フォルダ）
+// iOS Safari 向け：JSONをダウンロード（通常は「ダウンロード」フォルダ）
 function downloadJSON(filename: string, data: unknown) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
@@ -181,14 +181,8 @@ export default function RecordTab() {
   const [lastSavedSig, setLastSavedSig] = useState<string>("");
   const [currentSig, setCurrentSig] = useState<string>("");
 
-  // バナーDOMノード（直接挿入で Portal 不要／package.json 変更も不要）
-  const [bannerNode, setBannerNode] = useState<HTMLDivElement | null>(null);
-
   useEffect(() => {
-    try {
-      setExercises(loadExercises());
-    } catch {}
-
+    try { setExercises(loadExercises()); } catch {}
     try {
       const loaded = loadDayRecord(todayStr) as DayRecord | null | undefined;
       if (loaded) {
@@ -201,7 +195,6 @@ export default function RecordTab() {
         });
       }
     } catch {}
-
     try {
       const t = Number(localStorage.getItem("wt:lastDiskSaveAt") || 0);
       setLastDiskSaveAt(t);
@@ -211,7 +204,7 @@ export default function RecordTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* --- 保存リマインド：10日 --- */
+  /* --- 10日未保存フラグ --- */
   const hoursSinceSave = useMemo(() => {
     if (!lastDiskSaveAt) return Infinity;
     return (Date.now() - lastDiskSaveAt) / (1000 * 60 * 60);
@@ -230,46 +223,6 @@ export default function RecordTab() {
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
   }, [hasUnsavedChanges, shouldPromptSave]);
-
-  // 10日未保存バナー：タブの上の行に直接差し込み（タブ= role="tablist" 想定）
-  useEffect(() => {
-    // 既存ノードがあれば一旦片付け
-    if (bannerNode && (!shouldPromptSave)) {
-      bannerNode.remove();
-      setBannerNode(null);
-      return;
-    }
-    if (!shouldPromptSave || bannerNode) return;
-
-    const banner = document.createElement("div");
-    banner.setAttribute("data-wt-banner", "save-reminder");
-    banner.style.width = "100%";
-    banner.style.textAlign = "center";
-    banner.style.fontSize = "11px";
-    banner.style.lineHeight = "1.4";
-    banner.style.padding = "6px 8px";
-    banner.style.color = "#92400e";      // amber-700
-    banner.style.background = "#fffbeb"; // amber-50
-    banner.style.borderBottom = "1px solid #fcd34d"; // amber-200
-    banner.textContent = "10日以上ディスクに保存していません。右上の「保存」を押してください。";
-
-    // タブ直上に入れる（role="tablist" が見つからない場合は本文先頭にフォールバック）
-    const tablist = document.querySelector<HTMLElement>('[role="tablist"]');
-    if (tablist?.parentElement) {
-      tablist.parentElement.insertAdjacentElement("beforebegin", banner);
-    } else {
-      // 本文(このコンポーネントの最上位div)の直前へ
-      const root = document.getElementById("__next") || document.body;
-      root.insertAdjacentElement("afterbegin", banner);
-    }
-    setBannerNode(banner);
-
-    // クリーンアップ
-    return () => {
-      banner.remove();
-      setBannerNode(null);
-    };
-  }, [shouldPromptSave, bannerNode]);
 
   // 保存ヘルパー（空上書き防止）
   const persist = (next: DayRecord) => {
@@ -432,41 +385,54 @@ export default function RecordTab() {
   };
 
   return (
-    <div className="p-4 sm:p-6">
-      {/* ヘッダー：上＝保存ボタン（右寄せ）、下＝日付表示 */}
-      <div className="mb-1 flex items-center justify-end">
-        {hasUnsavedChanges && <span className="mr-3 text-xs text-rose-600">未保存の変更があります</span>}
-        <button
-          type="button"
-          className="rounded-md border px-3 py-1 text-sm hover:bg-slate-50"
-          onClick={() => {
-            const filename = `workoutrecord.${buildYYMMDDTT()}`; // 要件②
-            const payload = collectAllDayRecords();
-            downloadJSON(filename, payload); // iPhone の「ダウンロード」に保存
-
-            const sig = calcRecordsSignature();
-            const t = Date.now();
-            localStorage.setItem("wt:lastDiskSaveAt", String(t));
-            localStorage.setItem("wt:lastSavedSig", sig);
-            setLastDiskSaveAt(t);
-            setLastSavedSig(sig);
-            setCurrentSig(sig);
-          }}
-          aria-label="記録データを端末に保存"
+    <>
+      {/* レイアウト非依存の固定（fixed）バナー：タブ上部に重ねる。レイアウトは押さない＝揺れ防止 */}
+      {shouldPromptSave && (
+        <div
+          className="fixed top-0 left-0 right-0 z-50 text-center text-[11px] sm:text-xs text-amber-700 bg-amber-50 border-b border-amber-200 py-1"
+          role="status"
+          aria-live="polite"
         >
-          保存
-        </button>
-      </div>
+          10日以上ディスクに保存していません。右上の「保存」を押してください。
+        </div>
+      )}
 
-      {/* 日付表示（本文内のリマインドは表示しない。バナーはDOM直挿しでタブ上に表示） */}
-      <div className="mb-4 flex items-center justify-between">
-        <div className="text-slate-700">{displayDate}</div>
-      </div>
+      <div className="p-4 sm:p-6">
+        {/* ヘッダー：上＝保存ボタン（右寄せ）、下＝日付表示 */}
+        <div className="mb-1 flex items-center justify-end">
+          {hasUnsavedChanges && <span className="mr-3 text-xs text-rose-600">未保存の変更があります</span>}
+          <button
+            type="button"
+            className="rounded-md border px-3 py-1 text-sm hover:bg-slate-50"
+            onClick={() => {
+              const filename = `workoutrecord.${buildYYMMDDTT()}`; // 要件②
+              const payload = collectAllDayRecords();
+              downloadJSON(filename, payload); // iPhone の「ダウンロード」に保存
 
-      {renderCategory("upper", "上半身")}
-      {renderCategory("lower", "下半身")}
-      {renderCategory("etc", "その他")}
-    </div>
+              const sig = calcRecordsSignature();
+              const t = Date.now();
+              localStorage.setItem("wt:lastDiskSaveAt", String(t));
+              localStorage.setItem("wt:lastSavedSig", sig);
+              setLastDiskSaveAt(t);
+              setLastSavedSig(sig);
+              setCurrentSig(sig);
+            }}
+            aria-label="記録データを端末に保存"
+          >
+            保存
+          </button>
+        </div>
+
+        {/* 日付表示 */}
+        <div className="mb-4 flex items-center justify-between">
+          <div className="text-slate-700">{displayDate}</div>
+        </div>
+
+        {renderCategory("upper", "上半身")}
+        {renderCategory("lower", "下半身")}
+        {renderCategory("etc", "その他")}
+      </div>
+    </>
   );
 }
 
