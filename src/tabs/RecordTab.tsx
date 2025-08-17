@@ -178,11 +178,15 @@ export default function RecordTab() {
       ...(next.notesOther !== undefined ? { notesOther: next.notesOther } : {}),
     };
 
+    // ここを“明示指定”で必須プロパティを保証（スプレッドしない）
     const normalizedStrict: DayRecordStrict = {
-      ...normalized,
-      times: normalized.times ?? {},
-      sets: normalized.sets ?? {},
-      counts: normalized.counts ?? {},
+      date: normalized.date,
+      times: (normalized.times ?? {}) as Record<string, string[]>,
+      sets: (normalized.sets ?? {}) as Record<string, boolean[]>,
+      counts: (normalized.counts ?? {}) as Record<string, number[]>,
+      notesUpper: normalized.notesUpper ?? "",
+      notesLower: normalized.notesLower ?? "",
+      notesEtc: normalized.notesEtc ?? "",
     };
 
     const current = loadDayRecord(todayStr) as DayRecord | null | undefined;
