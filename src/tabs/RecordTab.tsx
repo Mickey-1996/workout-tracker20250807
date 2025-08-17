@@ -12,248 +12,235 @@ import {
   SelectItem,
 } from "@/components/ui/Select";
 import { loadDayRecord, saveDayRecord, loadJSON } from "@/lib/local-storage";
+import type {
+  ExerciseItem,
+  ExercisesByCategory as ExercisesGrouped,
+  ExercisesState,
+  DayRecord,
+  InputMode,
+  Category,
+} from "@/lib/types";
 
 /** ===== 端末ローカル日付ユーティリティ ===== */
-const ymdLocal = (d: Date) => {
+function toYmd(d: Date): string {
+  // 端末ローカルのYYYY-MM-DD
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
-  const da = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${da}`;
-};
-const todayStr = ymdLocal(new Date());
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 
-/** ===== 型（最低限） ===== */
-type ExerciseItem = {
-  id: string;
-  name: string;
-  category: "upper" | "lower" | "etc";
-  enabled?: boolean;
-  mode?: "check" | "count";
-  sets?: number;        // 1..5
-  repTarget?: number;   // 回数入力時のノルマ
-  order?: number;
-};
+/** ===== 設定ロード（v2優先→旧フォーマットfallback） ===== */
+function loadExercises(): ExercisesGrouped {
+  // 1) v2: items+order 形式(SettingsTab 保存先)
+  const v2 = loadJSON<any>("wt:settings.v2");
+  if (v2?.items && Array.isArray(v2.items)) {
+    const grouped: ExercisesGrouped = { upper: [], lower: [], etc: [] };
+    for (const it of v2.items as any[]) {
+      const item: ExerciseItem = {
+        id: String(it.id ?? ""),
+        name: String(it.name ?? ""),
+        category: (it.category ?? "etc") as Category,
+        enabled: Boolean(it.enabled ?? true),
+        mode: (it.mode ?? it.inputMode ?? "check") as InputMode,
+        inputMode: (it.inputMode ?? it.mode) as InputMode | undefined,
+        sets: it.sets ?? it.checkCount ?? 3,
+        checkCount: it.checkCount,
+        repTarget: it.repTarget,
+        order: it.order,
+      };
+      if (item.category === "upper" || item.category === "lower" || item.category === "etc") {
+        grouped[item.category].push(item);
+      } else {
+        // その他カテゴリは etc に寄せる
+        grouped.etc.push(item);
+      }
+    }
+    for (const k of ["upper", "lower", "etc"] as const) {
+      grouped[k].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    }
+    return grouped;
+  }
 
-type ExercisesState = {
-  upper: ExerciseItem[];
-  lower: ExerciseItem[];
-  etc: ExerciseItem[];
-};
-
-type DayRecord = {
-  date: string;
-  // 完了時刻（ISO文字列）: UI でチェック/回数入力した瞬間に push
-  times?: Record<string, string[]>;
-  // チェック/回数の保存
-  sets?: Record<string, boolean[]>;  // check 用
-  counts?: Record<string, number[]>; // count 用
-  // メモ（カテゴリ別）
-  notesUpper?: string;
-  notesLower?: string;
-  notesEtc?: string;
-};
-
-/** ===== メモ欄の記述例 ===== */
-const MEMO_EXAMPLE = "（例）アーチャープッシュアップも10回やった";
-
-/** ===== 設定ロード ===== */
-function loadExercises(): ExercisesState {
-  // 既存の KEY は "exercises" 前提
+  // 2) 旧：カテゴリごとの配列
   const raw = loadJSON<any>("exercises");
-  const fallback: ExercisesState = { upper: [], lower: [], etc: [] };
+  const fallback: ExercisesGrouped = { upper: [], lower: [], etc: [] };
   if (!raw) return fallback;
+
   const pick = (arr?: any[]) =>
     Array.isArray(arr)
       ? arr.map((it: any) => ({
           id: String(it.id ?? ""),
           name: String(it.name ?? ""),
-          category: (it.category ?? "etc") as ExerciseItem["category"],
+          category: (it.category ?? "etc") as Category,
           enabled: Boolean(it.enabled ?? true),
-          mode: (it.mode ?? "check") as ExerciseItem["mode"],
-          sets: Number(it.sets ?? 3),
-          repTarget: it.mode === "count" ? Number(it.repTarget ?? 10) : undefined,
+          mode: (it.mode ?? it.inputMode ?? "check") as InputMode,
+          inputMode: (it.inputMode ?? it.mode) as InputMode | undefined,
+          sets: Number(it.sets ?? it.checkCount ?? 3),
+          checkCount: it.checkCount,
+          repTarget: it.repTarget,
           order: Number(it.order ?? 1),
         }))
       : [];
-  return {
-    upper: pick(raw.upper).sort((a,b)=> (a.order??0)-(b.order??0)),
-    lower: pick(raw.lower).sort((a,b)=> (a.order??0)-(b.order??0)),
-    etc:   pick(raw.etc).sort((a,b)=> (a.order??0)-(b.order??0)),
+
+  const grouped: ExercisesGrouped = {
+    upper: pick(raw.upper),
+    lower: pick(raw.lower),
+    etc: pick(raw.etc),
   };
+  for (const k of ["upper", "lower", "etc"] as const) {
+    grouped[k].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  }
+  return grouped;
 }
 
-/** ===== インターバル（最新完了時刻との差）h ===== */
-function hoursSince(iso?: string): number | null {
-  if (!iso) return null;
-  const last = new Date(iso).getTime();
-  if (Number.isNaN(last)) return null;
-  const now = Date.now();
-  return Math.max(0, Math.floor((now - last) / (1000 * 60 * 60)));
+/** ====== セット数の配列を作る ====== */
+function makeSetArray(n: number): number[] {
+  const c = Math.max(1, Math.min(10, isFinite(n) ? Math.floor(n) : 3));
+  return Array.from({ length: c }, (_, i) => i);
 }
 
+/** ===== 本体 ===== */
 export default function RecordTab() {
-  const [ex, setEx] = useState<ExercisesState>({ upper: [], lower: [], etc: [] });
+  const today = useMemo(() => new Date(), []);
+  const todayStr = useMemo(() => toYmd(today), [today]);
+  const displayDate = useMemo(
+    () => `${today.getMonth() + 1}/${today.getDate()} (${["日","月","火","水","木","金","土"][today.getDay()]})`,
+    [today]
+  );
+
+  const exercises = useMemo(() => loadExercises(), []);
+
+  // 記録の初期値（notesは必須に寄せて空文字で用意）
   const [rec, setRec] = useState<DayRecord>(() => {
-    return (
-      (loadDayRecord(todayStr) as DayRecord | null) ?? {
-        date: todayStr,
-        times: {},
-        sets: {},
-        counts: {},
-      }
-    );
+    const loaded = loadDayRecord(todayStr) as DayRecord | undefined;
+    const base: DayRecord = loaded ?? {
+      date: todayStr,
+      times: {},
+      sets: {},
+      counts: {},
+      notesUpper: "",
+      notesLower: "",
+      notesEtc: "",
+      // notesOther は任意
+    };
+    // 念のため穴埋め
+    return {
+      ...base,
+      notesUpper: base.notesUpper ?? "",
+      notesLower: base.notesLower ?? "",
+      notesEtc: base.notesEtc ?? "",
+      // @ts-expect-error 任意フィールドの互換穴埋め
+      notesOther: (base as any).notesOther ?? "",
+    };
   });
 
-  useEffect(() => {
-    setEx(loadExercises());
-  }, []);
+  // 直近の完了時刻（種目ID -> ISO）
+  const [lastDone, setLastDone] = useState<Record<string, string>>({});
 
-  // 保存ヘルパ
+  // 保存ヘルパー：notesを必須化してから保存（★ビルドエラー対処の本丸）
   const persist = (next: DayRecord) => {
-    setRec(next);
-    saveDayRecord(todayStr, next);
+    const normalized: DayRecord = {
+      ...next,
+      notesUpper: next.notesUpper ?? "",
+      notesLower: next.notesLower ?? "",
+      notesEtc: next.notesEtc ?? "",
+      // @ts-expect-error 互換
+      notesOther: (next as any).notesOther ?? "",
+    };
+    setRec(normalized);
+    saveDayRecord(todayStr, normalized);
   };
 
-  // 直近の完了時刻（種目ごと）
-  const lastDoneMap = useMemo(() => {
-    const m = new Map<string, string | undefined>();
-    const t = rec.times ?? {};
-    for (const [id, arr] of Object.entries(t)) {
-      // 配列の中で最新（最大）を採用
-      let latest: string | undefined = undefined;
-      if (Array.isArray(arr)) {
-        for (const v of arr) {
-          if (!v) continue;
-          if (!latest || v > latest) latest = v;
-        }
-      }
-      if (latest) m.set(id, latest);
-    }
-    return m;
-  }, [rec.times]);
+  // 完了時刻の更新
+  const markDone = (id: string) => {
+    const iso = new Date().toISOString();
+    setLastDone((prev) => ({ ...prev, [id]: iso }));
+    persist({
+      ...rec,
+      times: { ...(rec.times ?? {}), [id]: [...(rec.times?.[id] ?? []), iso] },
+    });
+  };
 
-  // UI：セクション共通レンダラ
+  /** ===== UI: カテゴリレンダリング ===== */
   const renderCategory = (key: "upper" | "lower" | "etc", label: string) => {
-    const items = ex[key].filter((i) => i.enabled !== false);
-
+    const items = exercises[key].filter((it) => (it.enabled ?? true));
     return (
-      <Card key={key} className="mb-4 p-3">
-        <div className="mb-2 text-base font-bold">{label}</div>
-
-        <div className="space-y-3">
+      <Card className="mb-6 p-4">
+        <div className="mb-2 font-semibold">{label}</div>
+        <div className="space-y-4">
           {items.map((it) => {
             const id = it.id;
-            const setsArr = rec.sets?.[id] ?? [];
-            const cntsArr = rec.counts?.[id] ?? [];
-            const latestIso = lastDoneMap.get(id);
-            const hours = hoursSince(latestIso ?? undefined);
+            const mode = (it.mode ?? it.inputMode ?? "check") as InputMode;
+            const setCount = it.sets ?? it.checkCount ?? 3;
 
-            const nowISO = new Date().toISOString();
-
-            const setSetsArr = (a: boolean[]) =>
-              persist({
-                ...rec,
-                sets: { ...(rec.sets ?? {}), [id]: a },
-                times: {
-                  ...(rec.times ?? {}),
-                  [id]: (rec.times?.[id] ?? []).slice(), // 触らない
-                },
-              });
-
-            const setCountsArr = (a: number[]) =>
-              persist({
-                ...rec,
-                counts: { ...(rec.counts ?? {}), [id]: a },
-                times: {
-                  ...(rec.times ?? {}),
-                  [id]: (rec.times?.[id] ?? []).slice(), // 触らない
-                },
-              });
-
-            // チェックのトグル時：true にしたら現在時刻を記録。false にしたらそのセットの時刻は削除。
-            const toggleCheck = (idx: number) => {
-              const next = [...setsArr];
-              next[idx] = !next[idx];
-              // times を同期
-              const times = (rec.times?.[id] ?? []).slice();
-              if (next[idx]) {
-                times[idx] = nowISO;
-              } else {
-                times[idx] = ""; // 空なら無視される
-              }
-              persist({
-                ...rec,
-                sets: { ...(rec.sets ?? {}), [id]: next },
-                times: { ...(rec.times ?? {}), [id]: times },
-              });
-            };
-
-            // 回数入力：値が 0 以上なら時刻を記録、空/0 に戻したら時刻を消す
-            const changeCount = (idx: number, val: number) => {
-              const next = [...cntsArr];
-              next[idx] = val;
-              const times = (rec.times?.[id] ?? []).slice();
-              if (val > 0) {
-                times[idx] = nowISO;
-              } else {
-                times[idx] = "";
-              }
-              persist({
-                ...rec,
-                counts: { ...(rec.counts ?? {}), [id]: next },
-                times: { ...(rec.times ?? {}), [id]: times },
-              });
-            };
-
-            // 表示セット数
-            const n = Math.max(1, Math.min(5, Number(it.sets ?? 3)));
-
-            return (
-              <div key={id} className="rounded-md border border-slate-200 p-2">
-                <div className="mb-1 flex items-center justify-between">
-                  <div className="text-[15px] font-medium">{it.name}</div>
-                  <div className="text-xs text-slate-500">
-                    前回からのインターバル：{hours == null ? "-" : `${hours}H`}
+            if (mode === "count") {
+              const counts = rec.counts?.[id] ?? Array.from({ length: setCount }, () => 0);
+              const update = (idx: number, val: number) => {
+                const nextCounts = [...counts];
+                nextCounts[idx] = val;
+                const next = {
+                  ...rec,
+                  counts: { ...(rec.counts ?? {}), [id]: nextCounts },
+                };
+                persist(next);
+              };
+              return (
+                <div key={id} className="rounded-lg border border-slate-200 p-3">
+                  <div className="mb-2 text-sm text-slate-700">{it.name}</div>
+                  <div className="flex flex-wrap gap-2">
+                    {makeSetArray(setCount).map((idx) => (
+                      <div key={idx} className="flex items-center gap-2">
+                        <span className="text-xs text-slate-500">S{idx + 1}</span>
+                        <Select
+                          value={String(counts[idx] ?? 0)}
+                          onValueChange={(v) => update(idx, Number(v))}
+                        >
+                          <SelectTrigger className="h-8 w-20">
+                            <SelectValue placeholder="0" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {Array.from({ length: (it.repTarget ?? 20) + 1 }, (_, n) => n).map((n) => (
+                              <SelectItem key={n} value={String(n)}>
+                                {n}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ))}
                   </div>
                 </div>
+              );
+            }
 
-                {/* 入力ブロック（チェック or 回数） */}
-                {it.mode !== "count" ? (
-                  // チェックモード
-                  <div className="grid grid-cols-3 gap-2 sm:grid-cols-3">
-                    {Array.from({ length: n }, (_, i) => (
-                      <label key={i} className="flex items-center justify-center gap-2 rounded-md border p-2">
-                        <Checkbox
-                          className="h-[24px] w-[24px]"
-                          checked={!!setsArr[i]}
-                          onCheckedChange={() => toggleCheck(i)}
-                        />
-                        <span className="text-sm text-slate-600">{i + 1}セット</span>
-                      </label>
-                    ))}
-                  </div>
-                ) : (
-                  // 回数入力モード（セレクト）
-                  <div className="grid grid-cols-3 gap-2 sm:grid-cols-3">
-                    {Array.from({ length: n }, (_, i) => (
-                      <Select
-                        key={i}
-                        value={String(cntsArr[i] ?? "")}
-                        onValueChange={(v) => changeCount(i, Number(v || 0))}
-                      >
-                        <SelectTrigger className="w-full h-[40px] justify-end pr-3">
-                          <SelectValue placeholder={it.repTarget ? `ノルマ ${it.repTarget}` : "回数"} />
-                        </SelectTrigger>
-                        <SelectContent className="max-h-60">
-                          <SelectItem value="">未入力</SelectItem>
-                          {Array.from({ length: 99 }, (_, k) => k + 1).map((v) => (
-                            <SelectItem key={v} value={String(v)}>
-                              {v}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    ))}
+            // check モード
+            const checks = rec.sets?.[id] ?? Array.from({ length: setCount }, () => false);
+            const toggle = (idx: number) => {
+              const nextChecks = [...checks];
+              nextChecks[idx] = !nextChecks[idx];
+              const next = {
+                ...rec,
+                sets: { ...(rec.sets ?? {}), [id]: nextChecks },
+              };
+              persist(next);
+              if (nextChecks[idx]) markDone(id);
+            };
+
+            return (
+              <div key={id} className="rounded-lg border border-slate-200 p-3">
+                <div className="mb-2 text-sm text-slate-700">{it.name}</div>
+                <div className="flex flex-wrap gap-2">
+                  {makeSetArray(setCount).map((idx) => (
+                    <label key={idx} className="flex items-center gap-2 rounded-md border px-2 py-1">
+                      <Checkbox checked={!!checks[idx]} onCheckedChange={() => toggle(idx)} />
+                      <span className="text-xs text-slate-600">S{idx + 1}</span>
+                    </label>
+                  ))}
+                </div>
+                {lastDone[id] && (
+                  <div className="mt-1 text-xs text-slate-400">
+                    最終: {new Date(lastDone[id]).toLocaleTimeString()}
                   </div>
                 )}
               </div>
@@ -261,45 +248,37 @@ export default function RecordTab() {
           })}
         </div>
 
-        {/* メモ欄 */}
-        <div className="mt-3">
-          <label className="mb-1 block text-sm text-slate-600">
-            メモ（{label}） <span className="text-slate-400"> {MEMO_EXAMPLE}</span>
-          </label>
+        {/* カテゴリメモ */}
+        <div className="mt-4">
+          <div className="mb-1 text-xs text-slate-500">メモ（{label}）</div>
           <Textarea
-            className="text-sm"
             value={
               key === "upper"
-                ? rec.notesUpper ?? ""
+                ? rec.notesUpper
                 : key === "lower"
-                ? rec.notesLower ?? ""
-                : rec.notesEtc ?? ""
+                ? rec.notesLower
+                : rec.notesEtc
             }
-            onChange={(e) =>
-              persist({
+            onChange={(e) => {
+              const v = e.target.value;
+              const next: DayRecord = {
                 ...rec,
-                notesUpper: key === "upper" ? e.target.value : rec.notesUpper,
-                notesLower: key === "lower" ? e.target.value : rec.notesLower,
-                notesEtc: key === "etc" ? e.target.value : rec.notesEtc,
-              })
-            }
-            placeholder={MEMO_EXAMPLE}
+                notesUpper: key === "upper" ? v : rec.notesUpper ?? "",
+                notesLower: key === "lower" ? v : rec.notesLower ?? "",
+                notesEtc: key === "etc" ? v : rec.notesEtc ?? "",
+              };
+              persist(next);
+            }}
+            placeholder="今日の気づき・注意点など"
           />
         </div>
       </Card>
     );
   };
 
-  // ====== 表示日付（右肩のみ表示／保存・復元UIは無し） ======
-  const displayDate = useMemo(() => {
-    const d = new Date();
-    const w = ["日","月","火","水","木","金","土"][d.getDay()];
-    return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}(${w})`;
-  }, []);
-
   return (
     <div className="p-4 sm:p-6">
-      {/* ヘッダー：右肩に日付のみ（保存/復元UIは削除） */}
+      {/* ヘッダー：右肩に日付 */}
       <div className="mb-4 flex items-center justify-end text-slate-600 whitespace-nowrap">
         {displayDate}
       </div>
