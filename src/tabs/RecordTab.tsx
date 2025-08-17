@@ -21,11 +21,17 @@ import type {
   Category,
 } from "@/lib/types";
 
-// notes* を必須stringとして保存側に合わせるための型（最小差分）
-type DayRecordStrict = Omit<DayRecord, "notesUpper" | "notesLower" | "notesEtc"> & {
+// 保存側の期待に合わせて必須化した型
+type DayRecordStrict = Omit<
+  DayRecord,
+  "notesUpper" | "notesLower" | "notesEtc" | "times" | "sets" | "counts"
+> & {
   notesUpper: string;
   notesLower: string;
   notesEtc: string;
+  times: Record<string, string[]>;
+  sets: Record<string, boolean[]>;
+  counts: Record<string, number[]>;
 };
 
 /** ===== 端末ローカル日付ユーティリティ ===== */
@@ -112,7 +118,7 @@ function makeSetArray(n: number): number[] {
 }
 
 /** ===== “空データで上書き”を避ける保険 ===== */
-function hasAnyData(r: DayRecord | null | undefined) {
+function hasAnyData(r: DayRecord | DayRecordStrict | null | undefined) {
   if (!r) return false;
   const anySets =
     r.sets && Object.values(r.sets).some((arr) => (arr ?? []).some(Boolean));
@@ -162,7 +168,7 @@ export default function RecordTab() {
   // 直近の完了時刻（種目ID -> ISO）
   const [lastDone, setLastDone] = useState<Record<string, string>>({});
 
-  // 保存ヘルパー：notesを必須化してから保存（空上書き防止あり）
+  // 保存ヘルパー：notes必須化＋times/sets/countsの必須化（空上書き防止あり）
   const persist = (next: DayRecord) => {
     const normalized: DayRecord = {
       ...next,
@@ -172,14 +178,21 @@ export default function RecordTab() {
       ...(next.notesOther !== undefined ? { notesOther: next.notesOther } : {}),
     };
 
+    const normalizedStrict: DayRecordStrict = {
+      ...normalized,
+      times: normalized.times ?? {},
+      sets: normalized.sets ?? {},
+      counts: normalized.counts ?? {},
+    };
+
     const current = loadDayRecord(todayStr) as DayRecord | null | undefined;
-    if (!hasAnyData(normalized) && hasAnyData(current ?? undefined)) {
+    if (!hasAnyData(normalizedStrict) && hasAnyData(current ?? undefined)) {
       if (current) setRec(current); // 誤保存を回避して現状維持
       return;
     }
 
-    setRec(normalized);
-    saveDayRecord(todayStr, normalized as DayRecordStrict);
+    setRec(normalizedStrict);
+    saveDayRecord(todayStr, normalizedStrict);
   };
 
   // 完了時刻の更新
