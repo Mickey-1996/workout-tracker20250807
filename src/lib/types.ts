@@ -1,5 +1,5 @@
 // src/lib/types.ts
-// 差し替え用：型の不整合を解消し、既存データとの互換性を高めた定義
+// 既存コード（exercises-default.ts 等）の legacy フィールドにも対応する後方互換版
 
 // 入力方式：チェック式（セット完了のチェック） or 回数入力（セットごとの回数）
 export type InputMode = "check" | "count";
@@ -13,16 +13,23 @@ export type ExerciseItem = {
   name: string;          // 表示名
   category: Category;    // カテゴリ
   order: number;         // 並び順（小さいほど上）
-  enabled?: boolean;     // 使用可否（未指定ならtrue相当として扱う実装が多い）
-  mode: InputMode;       // 入力方式：check / count
+  enabled?: boolean;     // 使用可否（未指定なら true 相当で扱う実装が多い）
+
+  // ---- 現行フィールド（推奨） ----
+  mode?: InputMode;      // 入力方式：check / count（現行）
   setCount?: number;     // セット数（チェック式/回数式どちらでも使用）
-  repTarget?: number;    // 回数式のノルマ（UIの薄いプレースホルダ表示などに使用）
+  repTarget?: number;    // 回数式のノルマ（UIの薄いプレースホルダ表示など）
+
+  // ---- 後方互換フィールド（legacy）----
+  // 既存の exercises-default.ts などが参照している可能性があるため許容しておく
+  inputMode?: InputMode; // = mode の旧名称
+  checkCount?: number;   // = setCount の旧名称
 };
 
 // 種目一覧＋並び順などの設定全体
 export type ExercisesState = {
   items: ExerciseItem[]; // 種目配列
-  order: string[];       // 並び順（idの配列）
+  order: string[];       // 並び順（id の配列）
 };
 
 // 1日分の記録
@@ -35,12 +42,13 @@ export type DayRecord = {
   // 完了時刻（ISO文字列）。チェック/回数いずれの記録でも保存可
   times?:  Record<string, string[]>;
 
-  // メモ欄は未入力（undefined）も許容することで型エラーを回避し、既存データとも互換に
+  // メモ欄は未入力（undefined）も許容：型エラー回避と既存データ互換のため
   notesUpper?: string;
   notesLower?: string;
   notesOther?: string;
 };
 
-// （必要に応じて使用）直近完了時刻のマップ
+// 直近完了時刻のマップ（必要に応じて使用）
 export type LastDoneMap = Record<string, string>; // 種目ID -> 直近ISO時刻
 export type LastPrevMap = Record<string, string>; // 種目ID -> 直近の一つ前のISO時刻
+
