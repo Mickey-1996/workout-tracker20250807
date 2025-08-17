@@ -94,8 +94,14 @@ function hasAnyData(r: DayRecord | DayRecordStrict | null | undefined) {
   return Boolean(anySets || anyCounts || anyTimes || anyNotes.trim());
 }
 
-/* --- 設定ロード（v2優先→旧フォーマット） --- */
+/* --- 設定ロード --- */
+/** 可能な設定ソース:
+ *  1) wt:settings.v2 ... { items: [{ id, name, category, enabled, mode/inputMode, sets/checkCount, repTarget, order }] }
+ *  2) exercises      ... { upper/lower/etc: [{...}] }
+ *  3) wt:settings    ... { upper/lower/etc: [{...}] } ← これを新たにサポート（レガシー）
+ */
 function loadExercises(): ExercisesGrouped {
+  // v2（新フォーマット）
   const v2 = loadJSON<any>("wt:settings.v2");
   if (v2?.items && Array.isArray(v2.items)) {
     const grouped: ExercisesGrouped = { upper: [], lower: [], etc: [] };
@@ -112,11 +118,9 @@ function loadExercises(): ExercisesGrouped {
         repTarget: it.repTarget,
         order: it.order,
       };
-      if (item.category === "upper" || item.category === "lower" || item.category === "etc") {
-        grouped[item.category].push(item);
-      } else {
-        grouped.etc.push(item);
-      }
+      (item.category === "upper" ? grouped.upper
+        : item.category === "lower" ? grouped.lower
+        : grouped.etc).push(item);
     }
     for (const k of ["upper", "lower", "etc"] as const) {
       grouped[k].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
@@ -124,10 +128,23 @@ function loadExercises(): ExercisesGrouped {
     return grouped;
   }
 
+  // 旧: exercises
   const raw = loadJSON<any>("exercises");
-  const fallback: ExercisesGrouped = { upper: [], lower: [], etc: [] };
-  if (!raw) return fallback;
+  const groupedFromRaw = normalizeLegacyGrouped(raw);
+  if (groupedFromRaw) return groupedFromRaw;
 
+  // 旧: wt:settings（今回追加）
+  const legacy = loadJSON<any>("wt:settings");
+  const groupedFromLegacy = normalizeLegacyGrouped(legacy);
+  if (groupedFromLegacy) return groupedFromLegacy;
+
+  // どれも無ければ空
+  return { upper: [], lower: [], etc: [] };
+}
+
+/** legacy/exercises, legacy/wt:settings を {upper,lower,etc} に正規化 */
+function normalizeLegacyGrouped(src: any): ExercisesGrouped | null {
+  if (!src) return null;
   const norm = (arr?: any[]) =>
     Array.isArray(arr)
       ? arr.map((it: any) => ({
@@ -143,12 +160,18 @@ function loadExercises(): ExercisesGrouped {
           order: Number(it.order ?? 1),
         }))
       : [];
-
   const grouped: ExercisesGrouped = {
-    upper: norm(raw.upper),
-    lower: norm(raw.lower),
-    etc: norm(raw.etc),
+    upper: norm(src.upper),
+    lower: norm(src.lower),
+    etc: norm(src.etc),
   };
+  if (
+    grouped.upper.length === 0 &&
+    grouped.lower.length === 0 &&
+    grouped.etc.length === 0
+  ) {
+    return null;
+  }
   for (const k of ["upper", "lower", "etc"] as const) {
     grouped[k].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   }
@@ -183,6 +206,7 @@ export default function RecordTab() {
 
   useEffect(() => {
     try { setExercises(loadExercises()); } catch {}
+
     try {
       const loaded = loadDayRecord(todayStr) as DayRecord | null | undefined;
       if (loaded) {
@@ -195,6 +219,7 @@ export default function RecordTab() {
         });
       }
     } catch {}
+
     try {
       const t = Number(localStorage.getItem("wt:lastDiskSaveAt") || 0);
       setLastDiskSaveAt(t);
@@ -370,6 +395,13 @@ export default function RecordTab() {
             }}
           />
         </div>
+
+        {/* 種目が0件のときの小さな案内（UIは維持） */}
+        {exercises[key].filter((it) => it.enabled ?? true).length === 0 && (
+          <div className="mt-2 text-[11px] text-slate-400">
+            種目が未登録です。設定画面で種目を追加するとここに表示されます。
+          </div>
+        )}
       </Card>
     );
   };
