@@ -23,7 +23,6 @@ import type {
 
 /** ===== 端末ローカル日付ユーティリティ ===== */
 function toYmd(d: Date): string {
-  // 端末ローカルのYYYY-MM-DD
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
@@ -44,7 +43,7 @@ function loadExercises(): ExercisesGrouped {
         enabled: Boolean(it.enabled ?? true),
         mode: (it.mode ?? it.inputMode ?? "check") as InputMode,
         inputMode: (it.inputMode ?? it.mode) as InputMode | undefined,
-        sets: it.sets ?? it.checkCount ?? 3,
+        sets: typeof it.sets === "number" ? it.sets : (typeof it.checkCount === "number" ? it.checkCount : 3),
         checkCount: it.checkCount,
         repTarget: it.repTarget,
         order: it.order,
@@ -100,6 +99,23 @@ function makeSetArray(n: number): number[] {
   return Array.from({ length: c }, (_, i) => i);
 }
 
+/** ===== “空データで上書き”を避ける保険 ===== */
+function hasAnyData(r: DayRecord | undefined) {
+  if (!r) return false;
+  const anySets =
+    r.sets && Object.values(r.sets).some((arr) => (arr ?? []).some(Boolean));
+  const anyCounts =
+    r.counts && Object.values(r.counts).some((arr) => (arr ?? []).some((n) => (n ?? 0) > 0));
+  const anyTimes =
+    r.times && Object.values(r.times).some((arr) => (arr ?? []).length > 0);
+  const anyNotes =
+    (r.notesUpper ?? "") +
+    (r.notesLower ?? "") +
+    (r.notesEtc ?? "") +
+    ((r as any).notesOther ?? "");
+  return Boolean(anySets || anyCounts || anyTimes || anyNotes.trim());
+}
+
 /** ===== 本体 ===== */
 export default function RecordTab() {
   const today = useMemo(() => new Date(), []);
@@ -114,40 +130,46 @@ export default function RecordTab() {
   // 記録の初期値（notesは必須に寄せて空文字で用意）
   const [rec, setRec] = useState<DayRecord>(() => {
     const loaded = loadDayRecord(todayStr) as DayRecord | undefined;
-    const base: DayRecord = loaded ?? {
-      date: todayStr,
-      times: {},
-      sets: {},
-      counts: {},
-      notesUpper: "",
-      notesLower: "",
-      notesEtc: "",
-      // notesOther は任意
-    };
+    const base: DayRecord =
+      loaded ?? {
+        date: todayStr,
+        times: {},
+        sets: {},
+        counts: {},
+        notesUpper: "",
+        notesLower: "",
+        notesEtc: "",
+      };
     // 念のため穴埋め
     return {
       ...base,
       notesUpper: base.notesUpper ?? "",
       notesLower: base.notesLower ?? "",
       notesEtc: base.notesEtc ?? "",
-      // @ts-expect-error 任意フィールドの互換穴埋め
-      notesOther: (base as any).notesOther ?? "",
+      // notesOther は任意
+      ...(base as any).notesOther !== undefined ? { notesOther: (base as any).notesOther } : {},
     };
   });
 
   // 直近の完了時刻（種目ID -> ISO）
   const [lastDone, setLastDone] = useState<Record<string, string>>({});
 
-  // 保存ヘルパー：notesを必須化してから保存（★ビルドエラー対処の本丸）
+  // 保存ヘルパー：notesを必須化してから保存（空上書き防止あり）
   const persist = (next: DayRecord) => {
     const normalized: DayRecord = {
       ...next,
       notesUpper: next.notesUpper ?? "",
       notesLower: next.notesLower ?? "",
       notesEtc: next.notesEtc ?? "",
-      // @ts-expect-error 互換
-      notesOther: (next as any).notesOther ?? "",
+      ...(next as any).notesOther !== undefined ? { notesOther: (next as any).notesOther } : {},
     };
+
+    const current = loadDayRecord(todayStr);
+    if (!hasAnyData(normalized) && hasAnyData(current)) {
+      setRec(current!); // 誤保存を回避して現状維持
+      return;
+    }
+
     setRec(normalized);
     saveDayRecord(todayStr, normalized);
   };
@@ -164,7 +186,7 @@ export default function RecordTab() {
 
   /** ===== UI: カテゴリレンダリング ===== */
   const renderCategory = (key: "upper" | "lower" | "etc", label: string) => {
-    const items = exercises[key].filter((it) => (it.enabled ?? true));
+    const items = exercises[key].filter((it) => it.enabled ?? true);
     return (
       <Card className="mb-6 p-4">
         <div className="mb-2 font-semibold">{label}</div>
@@ -263,9 +285,9 @@ export default function RecordTab() {
               const v = e.target.value;
               const next: DayRecord = {
                 ...rec,
-                notesUpper: key === "upper" ? v : rec.notesUpper ?? "",
-                notesLower: key === "lower" ? v : rec.notesLower ?? "",
-                notesEtc: key === "etc" ? v : rec.notesEtc ?? "",
+                notesUpper: key === "upper" ? v : (rec.notesUpper ?? ""),
+                notesLower: key === "lower" ? v : (rec.notesLower ?? ""),
+                notesEtc: key === "etc" ? v : (rec.notesEtc ?? ""),
               };
               persist(next);
             }}
