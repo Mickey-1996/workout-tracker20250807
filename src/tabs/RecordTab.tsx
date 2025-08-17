@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Textarea } from "@/components/ui/Textarea";
 import { Checkbox } from "@/components/ui/Checkbox";
@@ -17,10 +17,23 @@ import { loadDayRecord, saveDayRecord, loadJSON } from "@/lib/local-storage";
 const MEMO_EXAMPLE = "（例）アーチャープッシュアップも10回やった";
 /* ================================================ */
 
-/** セルサイズ（チェック/回数とも同じサイズ：約1.3倍） */
+/** セルサイズ（チェック/回数とも同じサイズ） */
 const CELL = 52; // px
 const GAP_PX = 8; // gap-2 相当
 const GRID_WIDTH_PX = 3 * CELL + 2 * GAP_PX; // 1行3セル＋2ギャップを右寄せ
+
+/* === 端末タイムゾーンで YYYY-MM-DD を作る === */
+const ymdLocal = (d = new Date()) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
+const todayStr = ymdLocal();
+const fmtDateJP = (iso: string) => {
+  const [y, m, d] = iso.split("-").map(Number);
+  return `${y}年${m}月${d}日`;
+};
 
 type DayRecord = {
   date: string;
@@ -29,7 +42,7 @@ type DayRecord = {
   notesOther?: string;
   sets: Record<string, boolean[]>;
   counts?: Record<string, number[]>;
-  /** 追加：各セットの「正の入力（チェックON or 回数>0）」が最後に行われたISO時刻 */
+  /** 各セットで「正の入力（チェックor回数>0）」が行われたISO時刻 */
   times?: Record<string, (string | null)[]>;
 };
 
@@ -41,53 +54,21 @@ type ExercisesState = Record<
 type SettingsItem = {
   id: string;
   name: string;
-  /** "check" or "count" */
   inputMode?: "check" | "count";
-  /** セット数（チェック式の時の最大セット数） */
   checkCount?: number;
-  /** セット数（count でも使う） */
   sets?: number;
-  /** count入力のときのノルマ回数（プレースホルダー） */
   repTarget?: number;
-  /** 表示順（小さいほど上） */
   order?: number;
-  /** 所属カテゴリ */
   category: "upper" | "lower" | "other";
-  /** 無効化フラグ */
   enabled?: boolean;
 };
-
-type Settings = {
-  items?: SettingsItem[];
-};
-
+type Settings = { items?: SettingsItem[] };
 type Category = "upper" | "lower" | "other";
 type InputMode = "check" | "count";
-
 type MetaMap = Record<
   string,
-  {
-    mode: InputMode;
-    setCount: number;
-    repTarget?: number;
-  }
+  { mode: InputMode; setCount: number; repTarget?: number }
 >;
-
-const todayStr = new Date().toISOString().split("T")[0];
-const fmtDateJP = (iso: string) => {
-  const [y, m, d] = iso.split("-").map(Number);
-  return `${y}年${m}月${d}日`;
-};
-
-const hoursSince = (iso?: string): number | null => {
-  if (!iso) return null;
-  const t = new Date(iso).getTime();
-  if (Number.isNaN(t)) return null;
-  return Math.max(0, Math.floor((Date.now() - t) / 3600000));
-};
-
-const catLabel = (c: string) =>
-  c === "upper" ? "上半身トレ" : c === "lower" ? "下半身トレ" : "その他";
 
 const COUNT_MAX = 99;
 
@@ -98,6 +79,10 @@ const KEY_V1 = "lastDone-v1";
 const KEY_V0 = "lastDone-v0"; // 互換キー
 const KEY_PREV = "lastDone-prev";
 const KEY_ALT = "lastDone";
+
+/* 記録タブのバックアップ・変更監視キー */
+const KEY_BACKUP_SAVED_AT = "records:backup:lastSavedAt";
+const KEY_LAST_CHANGED_AT = "records:lastChangeAt";
 
 function CalendarIcon({ size = 18 }: { size?: number }) {
   return (
@@ -118,13 +103,77 @@ function CalendarIcon({ size = 18 }: { size?: number }) {
   );
 }
 
+/* 端末保存（全量バックアップ）：このドメインの localStorage を全部JSON保存 */
+function saveAllLocalStorageToFile() {
+  const data: Record<string, string | null> = {};
+  for (let i = 0; i < window.localStorage.length; i++) {
+    const k = window.localStorage.key(i)!;
+    data[k] = window.localStorage.getItem(k);
+  }
+  const payload = {
+    type: "workout-records-backup",
+    exportedAt: new Date().toISOString(),
+    data,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: "application/json",
+  });
+  const a = document.createElement("a");
+  const ymd = todayStr.replaceAll("-", "");
+  a.href = URL.createObjectURL(blob);
+  a.download = `workout-records-backup-${ymd}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+
+  try {
+    window.localStorage.setItem(KEY_BACKUP_SAVED_AT, new Date().toISOString());
+  } catch {}
+}
+
+/* 復元（JSONファイル→ localStorage に書き戻し） */
+async function restoreAllFromFile(file: File) {
+  const text = await file.text();
+  const json = JSON.parse(text);
+  if (!json || json.type !== "workout-records-backup" || !json.data) {
+    alert("バックアップファイルの形式が不正です。");
+    return;
+  }
+  const data: Record<string, string | null> = json.data;
+  for (const [k, v] of Object.entries(data)) {
+    if (v === null) {
+      window.localStorage.removeItem(k);
+    } else {
+      window.localStorage.setItem(k, v);
+    }
+  }
+  window.localStorage.setItem(KEY_BACKUP_SAVED_AT, new Date().toISOString());
+  alert("復元が完了しました。ページを再読み込みします。");
+  window.location.reload();
+}
+
+/* 直近のバックアップから1週間以上経過＆変更ありなら true */
+function shouldRemindBackup(): boolean {
+  const savedAt = window.localStorage.getItem(KEY_BACKUP_SAVED_AT);
+  const changedAt = window.localStorage.getItem(KEY_LAST_CHANGED_AT);
+  if (!changedAt) return false; // 変更なし
+  if (!savedAt) return true;
+  const weekMs = 7 * 24 * 3600 * 1000;
+  return Date.now() - Date.parse(savedAt) > weekMs && Date.parse(changedAt) > Date.parse(savedAt);
+}
+
+/* 変更マーク（保存促しに使う） */
+function markChangedNow() {
+  try {
+    window.localStorage.setItem(KEY_LAST_CHANGED_AT, new Date().toISOString());
+  } catch {}
+}
+
 export default function RecordTab() {
   /* 設定→メタ */
   const [meta, setMeta] = useState<MetaMap>({});
   useEffect(() => {
     const settings = loadJSON<Settings>("settings-v1");
     const items = settings?.items?.filter((x) => x.enabled !== false) ?? [];
-
     const m: MetaMap = {};
     for (const it of items) {
       const mode: InputMode = it.inputMode ?? "check";
@@ -142,9 +191,7 @@ export default function RecordTab() {
     const items = settings?.items?.filter((x) => x.enabled !== false) ?? [];
     const grouped: ExercisesState = { upper: [], lower: [], other: [] } as any;
 
-    const sorted = [...items].sort(
-      (a, b) => (a.order ?? 0) - (b.order ?? 0)
-    );
+    const sorted = [...items].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
     for (const it of sorted) {
       grouped[it.category].push({
         id: it.id,
@@ -167,7 +214,7 @@ export default function RecordTab() {
   });
 
   useEffect(() => {
-    const loaded = loadDayRecord(todayStr) as Partial<DayRecord> | null;
+    const loaded = (loadDayRecord as any)(todayStr) as Partial<DayRecord> | null;
     if (loaded) {
       setDayRecord({
         date: todayStr,
@@ -176,7 +223,7 @@ export default function RecordTab() {
         notesOther: loaded.notesOther ?? "",
         sets: loaded.sets ?? {},
         counts: loaded.counts ?? {},
-        times: loaded.times ?? {}, // 追加フィールドは後方互換
+        times: loaded.times ?? {}, // 後方互換
       });
     }
   }, []);
@@ -184,6 +231,7 @@ export default function RecordTab() {
   const persist = (rec: DayRecord) => {
     setDayRecord(rec);
     (saveDayRecord as any)(todayStr, rec);
+    markChangedNow();
   };
 
   /* 最終実施（インターバル表示用） */
@@ -208,7 +256,6 @@ export default function RecordTab() {
   /** 当日の times[*] から「その種目の最新実施時刻（最大）」を計算し、last-done を同期 */
   const recomputeAndSyncLastDone = (exerciseId: string, record: DayRecord) => {
     const arr = record.times?.[exerciseId] ?? [];
-    // 有効なISOのみ→数値（エポック）で最大を算出
     let latestTs = 0;
     for (const t of arr) {
       if (!t) continue;
@@ -220,7 +267,6 @@ export default function RecordTab() {
     setLastDone((cur) => {
       if (latest) {
         if (cur[exerciseId] !== latest) {
-          // 上書き前を prev に退避
           setLastPrev((pp) => {
             const nextPrev = { ...pp, [exerciseId]: cur[exerciseId] };
             const next = { ...cur, [exerciseId]: latest };
@@ -229,7 +275,7 @@ export default function RecordTab() {
           });
           return { ...cur, [exerciseId]: latest };
         }
-        return cur; // 変更なし
+        return cur;
       } else {
         if (cur[exerciseId]) {
           const next = { ...cur };
@@ -248,50 +294,37 @@ export default function RecordTab() {
     const arr = [...(sets[exerciseId] ?? [])];
     const nowOn = on ?? !arr[setIndex];
 
-    // 足りない分は false で埋める
     const needLen = Math.max(setIndex + 1, arr.length);
     for (let i = 0; i < needLen; i++) if (arr[i] == null) arr[i] = false;
 
     arr[setIndex] = nowOn;
     sets[exerciseId] = arr;
 
-    // times を更新
     const times = { ...(dayRecord.times || {}) };
     const tArr = [...(times[exerciseId] ?? [])];
-    if (nowOn) {
-      tArr[setIndex] = new Date().toISOString();
-    } else {
-      tArr[setIndex] = null; // 取消
-    }
+    tArr[setIndex] = nowOn ? new Date().toISOString() : null;
     times[exerciseId] = tArr;
 
     const next: DayRecord = { ...dayRecord, sets, times };
     persist(next);
-    // 最新実施時刻を再計算して反映
     recomputeAndSyncLastDone(exerciseId, next);
   };
 
-  /* 回数選択（0～99のセレクト） */
+  /* 回数選択 */
   const changeCount = (exerciseId: string, setIndex: number, value: string) => {
     let n = Math.floor(Number(value || "0"));
     if (!Number.isFinite(n) || n < 0) n = 0;
 
     const counts = { ...(dayRecord.counts || {}) };
     const cArr = [...(counts[exerciseId] ?? [])];
-    // 足りない分は0で埋める
     const needLen = Math.max(setIndex + 1, cArr.length);
     for (let i = 0; i < needLen; i++) if (cArr[i] == null) cArr[i] = 0;
     cArr[setIndex] = n;
     counts[exerciseId] = cArr;
 
-    // times を更新（回数>0 なら記録、0なら取消）
     const times = { ...(dayRecord.times || {}) };
     const tArr = [...(times[exerciseId] ?? [])];
-    if (n > 0) {
-      tArr[setIndex] = new Date().toISOString();
-    } else {
-      tArr[setIndex] = null;
-    }
+    tArr[setIndex] = n > 0 ? new Date().toISOString() : null;
     times[exerciseId] = tArr;
 
     const next: DayRecord = { ...dayRecord, counts, times };
@@ -307,6 +340,12 @@ export default function RecordTab() {
   };
 
   /* ラベル */
+  const hoursSince = (iso?: string): number | null => {
+    if (!iso) return null;
+    const t = Date.parse(iso);
+    if (Number.isNaN(t)) return null;
+    return Math.max(0, Math.floor((Date.now() - t) / 3600000));
+  };
   const recoveryText = (exerciseId: string) => {
     const h = hoursSince(lastDone[exerciseId]);
     if (h == null) return "—";
@@ -314,22 +353,51 @@ export default function RecordTab() {
     return `${h}H`;
   };
 
+  /* 復元ファイル入力 */
+  const fileRef = useRef<HTMLInputElement>(null);
+  const onClickRestore = () => fileRef.current?.click();
+  const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    await restoreAllFromFile(f);
+  };
+
+  const [showRemind, setShowRemind] = useState(false);
+  useEffect(() => {
+    setShowRemind(shouldRemindBackup());
+  }, []);
+
   if (!exercises) {
     return <div>種目データがありません。（設定タブで種目を追加してください）</div>;
   }
 
-  /* 見出し行：タイトル左、日付右 */
+  /* 見出し行：タイトル左、日付＋ボタン群右 */
   const Header = () => (
     <div className="flex items-center gap-3 mb-4">
-      <img
-        src="/icons/icon-192x192.png"
-        alt="icon"
-        className="w-10 h-10 rounded-md"
-      />
+      <img src="/icons/icon-192x192.png" alt="icon" className="w-10 h-10 rounded-md" />
       <h1 className="text-lg font-bold">筋トレ記録</h1>
-      <div className="ml-auto flex items-center gap-1 text-slate-600">
+      <div className="ml-auto flex items-center gap-2 text-slate-600">
         <CalendarIcon />
         <span className="text-sm">{fmtDateJP(todayStr)}</span>
+        <button
+          className="ml-3 px-3 py-1 text-sm rounded bg-slate-900 text-white"
+          onClick={saveAllLocalStorageToFile}
+        >
+          端末に保存（JSON）
+        </button>
+        <button
+          className="px-3 py-1 text-sm rounded border border-slate-300"
+          onClick={onClickRestore}
+        >
+          バックアップから復元
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/json"
+          className="hidden"
+          onChange={onFile}
+        />
       </div>
     </div>
   );
@@ -337,6 +405,32 @@ export default function RecordTab() {
   return (
     <div className="space-y-5">
       <Header />
+
+      {/* バックアップの促し（1週間以上保存なし＆変更あり） */}
+      {showRemind && (
+        <Card className="p-4 bg-amber-50 text-amber-900">
+          <div className="text-sm leading-relaxed">
+            最近、端末へのバックアップが1週間以上行われていません。変更内容を失わないよう、端末に保存をおすすめします。
+          </div>
+          <div className="mt-3 flex gap-3">
+            <button
+              onClick={() => {
+                saveAllLocalStorageToFile();
+                setShowRemind(false);
+              }}
+              className="px-4 py-2 rounded bg-slate-900 text-white"
+            >
+              端末に保存（JSON）
+            </button>
+            <button
+              onClick={() => setShowRemind(false)}
+              className="px-4 py-2 rounded border border-slate-300"
+            >
+              後で
+            </button>
+          </div>
+        </Card>
+      )}
 
       {Object.entries(exercises).map(([category, categoryExercises]) => {
         const cat = category as Category;
@@ -349,7 +443,9 @@ export default function RecordTab() {
 
         return (
           <Card key={category} className="p-4">
-            <h2 className="text-base font-bold mb-3">{catLabel(category)}</h2>
+            <h2 className="text-base font-bold mb-3">
+              {cat === "upper" ? "上半身トレ" : cat === "lower" ? "下半身トレ" : "その他"}
+            </h2>
 
             {categoryExercises.map((ex) => {
               const m = meta[ex.id];
@@ -361,15 +457,13 @@ export default function RecordTab() {
                 <div key={ex.id} className="border-b last:border-b-0 py-3">
                   {/* 1行目：種目名 + インターバル */}
                   <div className="flex items-center gap-3">
-                    <div className="text-[15px] sm:text-base font-medium">
-                      {ex.name}
-                    </div>
+                    <div className="text-[15px] sm:text-base font-medium">{ex.name}</div>
                     <div className="ml-auto w-full sm:w-auto text-sm text-slate-500 text-right">
                       前回からのインターバル：{recoveryText(ex.id)}
                     </div>
                   </div>
 
-                  {/* 2行目：右寄せ 3列グリッド（幅は style で確実に適用） */}
+                  {/* 2行目：右寄せ 3列グリッド */}
                   <div className="mt-2 ml-auto" style={{ width: GRID_WIDTH_PX }}>
                     {mode === "count" ? (
                       <div className="grid grid-cols-3 gap-2">
@@ -386,9 +480,7 @@ export default function RecordTab() {
                                 style={{ width: CELL, height: CELL }}
                               >
                                 <SelectValue
-                                  placeholder={
-                                    repTarget != null ? String(repTarget) : undefined
-                                  }
+                                  placeholder={repTarget != null ? String(repTarget) : undefined}
                                 />
                               </SelectTrigger>
                               <SelectContent className="max-h-64">
@@ -415,10 +507,8 @@ export default function RecordTab() {
                             >
                               <Checkbox
                                 checked={on}
-                                onCheckedChange={(v) =>
-                                  toggleSet(ex.id, idx, !!v)
-                                }
-                                className="w-[26px] h-[26px]" // 視認性を上げるため大きめ
+                                onCheckedChange={(v) => toggleSet(ex.id, idx, !!v)}
+                                className="w-[26px] h-[26px]"
                               />
                             </button>
                           );
