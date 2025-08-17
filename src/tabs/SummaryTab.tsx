@@ -22,113 +22,239 @@ type DayRecord = {
   sets?: Record<string, boolean[]>;
   counts?: Record<string, number[]>;
   times?: Record<string, string[]>;
-  notesUpper?: string;
-  notesLower?: string;
-  notesEtc?: string;
+  notesUpper: string;
+  notesLower: string;
+  notesEtc: string;
+  notesOther?: string;
 };
 
-// ===== ローカル日付ユーティリティ =====
-const ymdLocal = (d: Date) => {
+function ymdLocal(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
-  const da = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${da}`;
-};
-
-// ===== 復元（localStorage 全量インポート） =====
-function importAllLocalStorageFromFile(file?: File | null) {
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    try {
-      const text = String(reader.result ?? "");
-      const obj = JSON.parse(text) as Record<string, string | null>;
-      Object.entries(obj).forEach(([k, v]) => {
-        if (v == null) localStorage.removeItem(k);
-        else localStorage.setItem(k, v);
-      });
-      alert("復元が完了しました。必要に応じてページを再読み込みしてください。");
-    } catch (e) {
-      alert("JSON の読み込み/復元に失敗しました。");
-      console.error(e);
-    }
-  };
-  reader.readAsText(file);
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
-// ===== exercises を読み出す（設定タブ保存フォーマットを想定） =====
-function loadExercises(): ExercisesState {
+/** localStorage helpers（要：現行キー `day:YYYY-MM-DD`） */
+function loadRecordByDate(ymd: string): DayRecord | undefined {
   try {
-    const raw = localStorage.getItem("exercises");
-    const obj = raw ? JSON.parse(raw) : null;
-    const pick = (arr?: any[]) =>
-      Array.isArray(arr)
-        ? arr.map((it) => ({
+    const raw = localStorage.getItem(`day:${ymd}`);
+    if (!raw) return undefined;
+    const r = JSON.parse(raw) as Partial<DayRecord>;
+    return {
+      date: ymd,
+      times: r.times ?? {},
+      sets: r.sets ?? {},
+      counts: r.counts ?? {},
+      notesUpper: r.notesUpper ?? "",
+      notesLower: r.notesLower ?? "",
+      notesEtc: r.notesEtc ?? "",
+      ...(r.notesOther !== undefined ? { notesOther: r.notesOther } : {}),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function loadExercisesFromSettings(): ExercisesState {
+  try {
+    // v2（SettingsTab 新形式）
+    const v2Raw = localStorage.getItem("wt:settings.v2");
+    if (v2Raw) {
+      const v2 = JSON.parse(v2Raw);
+      if (v2?.items && Array.isArray(v2.items)) {
+        const upper: ExerciseItem[] = [];
+        const lower: ExerciseItem[] = [];
+        const etc: ExerciseItem[] = [];
+        for (const it of v2.items as any[]) {
+          const item: ExerciseItem = {
             id: String(it.id ?? ""),
             name: String(it.name ?? ""),
             category: (it.category ?? "etc") as ExerciseItem["category"],
+          };
+          if (item.category === "upper") upper.push(item);
+          else if (item.category === "lower") lower.push(item);
+          else etc.push(item);
+        }
+        return { upper, lower, etc };
+      }
+    }
+  } catch {}
+
+  // 旧形式 fallback
+  try {
+    const raw = localStorage.getItem("exercises");
+    if (!raw) return { upper: [], lower: [], etc: [] };
+    const old = JSON.parse(raw);
+    const norm = (arr?: any[]): ExerciseItem[] =>
+      Array.isArray(arr)
+        ? arr.map((x) => ({
+            id: String(x.id ?? ""),
+            name: String(x.name ?? ""),
+            category: (x.category ?? "etc") as ExerciseItem["category"],
           }))
         : [];
     return {
-      upper: pick(obj?.upper),
-      lower: pick(obj?.lower),
-      etc: pick(obj?.etc),
+      upper: norm(old.upper),
+      lower: norm(old.lower),
+      etc: norm(old.etc),
     };
   } catch {
     return { upper: [], lower: [], etc: [] };
   }
 }
 
-// ===== 記録キー探索（day:YYYY-MM-DD 互換） =====
-function loadRecordByDate(ymd: string): DayRecord | null {
-  const candidates = [`day:${ymd}`, `record:${ymd}`, ymd];
-  for (const k of candidates) {
-    const v = localStorage.getItem(k);
-    if (!v) continue;
-    try {
-      const obj = JSON.parse(v);
-      if (obj && typeof obj === "object") {
-        return { date: ymd, ...obj };
-      }
-    } catch {}
+/** エクスポート */
+function exportAllDayRecords() {
+  const data: Record<string, DayRecord> = {};
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith("day:")) {
+      try {
+        data[k] = JSON.parse(localStorage.getItem(k)!) as DayRecord;
+      } catch {}
+    }
   }
-  return null;
+  const blob = new Blob([JSON.stringify(data, null, 2)], {
+    type: "application/json",
+  });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "backup-day-records.json";
+  a.click();
 }
 
-function monthMatrix(base: Date) {
-  const y = base.getFullYear();
-  const m = base.getMonth();
-  const first = new Date(y, m, 1);
-  const last = new Date(y, m + 1, 0);
-  const startDay = first.getDay(); // 0..6
-  const days = last.getDate();
-
-  const cells: (Date | null)[] = [];
-  for (let i = 0; i < startDay; i++) cells.push(null);
-  for (let d = 1; d <= days; d++) cells.push(new Date(y, m, d));
-  while (cells.length % 7 !== 0) cells.push(null);
-
-  const weeks: (Date | null)[][] = [];
-  for (let i = 0; i < cells.length; i += 7) {
-    weeks.push(cells.slice(i, i + 7));
+/** インポート（単純上書きではなく結合） */
+async function importAllLocalStorageFromFile(file: File | null) {
+  if (!file) return;
+  const text = await file.text();
+  let imported: any;
+  try {
+    imported = JSON.parse(text);
+  } catch {
+    alert("JSONの解析に失敗しました");
+    return;
   }
-  return weeks;
+  const keys = Object.keys(imported).filter((k) => k.startsWith("day:"));
+
+  const mergeBoolArr = (a: boolean[] = [], b: boolean[] = []) => {
+    const n = Math.max(a.length, b.length);
+    const out = new Array<boolean>(n);
+    for (let i = 0; i < n; i++) out[i] = Boolean(a[i] || b[i]);
+    return out;
+  };
+  const mergeNumArr = (a: number[] = [], b: number[] = []) => {
+    const n = Math.max(a.length, b.length);
+    const out = new Array<number>(n);
+    for (let i = 0; i < n; i++) out[i] = Math.max(a[i] ?? 0, b[i] ?? 0);
+    return out;
+  };
+  const uniq = <T,>(arr: T[] = []) => Array.from(new Set(arr));
+
+  const mergeDay = (dst: Partial<DayRecord> = {}, src: Partial<DayRecord> = {}): DayRecord => {
+    const out: DayRecord = {
+      date: (src.date as string) || (dst.date as string) || "",
+      times: { ...(dst.times ?? {}) },
+      sets: { ...(dst.sets ?? {}) },
+      counts: { ...(dst.counts ?? {}) },
+      notesUpper: (dst.notesUpper ?? "") || (src.notesUpper ?? ""),
+      notesLower: (dst.notesLower ?? "") || (src.notesLower ?? ""),
+      notesEtc: (dst.notesEtc ?? "") || (src.notesEtc ?? ""),
+      ...(dst.notesOther !== undefined || src.notesOther !== undefined
+        ? { notesOther: (dst.notesOther ?? "") || (src.notesOther ?? "") }
+        : {}),
+    };
+
+    const timeIds = new Set([
+      ...Object.keys(dst.times ?? {}),
+      ...Object.keys(src.times ?? {}),
+    ]);
+    for (const id of timeIds) {
+      const a = dst.times?.[id] ?? [];
+      const b = src.times?.[id] ?? [];
+      out.times![id] = uniq([...(a || []), ...(b || [])]).sort();
+    }
+
+    const setIds = new Set([
+      ...Object.keys(dst.sets ?? {}),
+      ...Object.keys(src.sets ?? {}),
+    ]);
+    for (const id of setIds) {
+      const a = dst.sets?.[id] ?? [];
+      const b = src.sets?.[id] ?? [];
+      out.sets![id] = mergeBoolArr(a, b);
+    }
+
+    const countIds = new Set([
+      ...Object.keys(dst.counts ?? {}),
+      ...Object.keys(src.counts ?? {}),
+    ]);
+    for (const id of countIds) {
+      const a = dst.counts?.[id] ?? [];
+      const b = src.counts?.[id] ?? [];
+      out.counts![id] = mergeNumArr(a, b);
+    }
+
+    // メモが両方非空で異なる場合は dst を優先し src を追記
+    const appendIfBoth = (d = "", s = "") =>
+      d && s && d !== s ? `${d}\n[import] ${s}` : d || s || "";
+    out.notesUpper = appendIfBoth(dst.notesUpper ?? "", src.notesUpper ?? "");
+    out.notesLower = appendIfBoth(dst.notesLower ?? "", src.notesLower ?? "");
+    out.notesEtc = appendIfBoth(dst.notesEtc ?? "", src.notesEtc ?? "");
+
+    return out;
+  };
+
+  const report: any[] = [];
+  for (const k of keys) {
+    const src = imported[k] as Partial<DayRecord>;
+    let dst: Partial<DayRecord> = {};
+    try {
+      const raw = localStorage.getItem(k);
+      if (raw) dst = JSON.parse(raw);
+    } catch {}
+    const merged = mergeDay(dst, src);
+    localStorage.setItem(k, JSON.stringify(merged));
+    report.push({ key: k, action: dst ? "merge" : "create" });
+  }
+  console.table(report);
+  alert(`完了: ${report.length}件をインポート/マージしました。ページを再読み込みしてください。`);
 }
 
 export default function SummaryTab() {
-  const [ex, setEx] = useState<ExercisesState>({ upper: [], lower: [], etc: [] });
-  const [base, setBase] = useState<Date>(new Date());
-  const [selected, setSelected] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  useEffect(() => {
-    setEx(loadExercises());
-  }, []);
+  // 設定（種目名解決用）
+  const ex = useMemo(() => loadExercisesFromSettings(), []);
 
-  const weeks = useMemo(() => monthMatrix(base), [base]);
+  // カレンダーのベース月（1日固定）
+  const [base, setBase] = useState(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  });
 
+  // base 月の週配列（6週固定表示）
+  const weeks = useMemo(() => {
+    const firstDay = new Date(base.getFullYear(), base.getMonth(), 1);
+    const start = new Date(firstDay);
+    start.setDate(firstDay.getDate() - ((firstDay.getDay() + 6) % 7)); // 月曜起点
+
+    const grid: (Date | null)[][] = [];
+    for (let w = 0; w < 6; w++) {
+      const row: (Date | null)[] = [];
+      for (let d = 0; d < 7; d++) {
+        const cur = new Date(start);
+        cur.setDate(start.getDate() + w * 7 + d);
+        if (cur.getMonth() !== base.getMonth()) row.push(null);
+        else row.push(cur);
+      }
+      grid.push(row);
+    }
+    return grid;
+  }, [base]);
+
+  // 各日の有無（高速化のためマップ化）
   const recordsMap = useMemo(() => {
-    // 月内すべて読み込んでマップ化
     const map = new Map<string, DayRecord>();
     for (const wk of weeks) {
       for (const d of wk) {
@@ -146,16 +272,11 @@ export default function SummaryTab() {
     return recordsMap.has(ymdLocal(d));
   };
 
-  const selectedRecord = selected ? recordsMap.get(selected) ?? null : null;
-
-  // 種目名解決
-  const nameOf = (id: string) => {
-    for (const g of [ex.upper, ex.lower, ex.etc]) {
-      const hit = g.find((x) => x.id === id);
-      if (hit) return hit.name || id;
-    }
-    return id;
-  };
+  const [selectedYmd, setSelectedYmd] = useState<string | null>(null);
+  const selectedRecord = useMemo(
+    () => (selectedYmd ? recordsMap.get(selectedYmd) : undefined),
+    [recordsMap, selectedYmd]
+  );
 
   return (
     <div className="p-4 sm:p-6">
@@ -168,7 +289,7 @@ export default function SummaryTab() {
           className="hidden"
           onChange={(e) => importAllLocalStorageFromFile(e.target.files?.[0] ?? null)}
         />
-        <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
+        <Button onClick={() => fileInputRef.current?.click()}>
           復元
         </Button>
       </div>
@@ -193,65 +314,95 @@ export default function SummaryTab() {
           </button>
         </div>
 
-        {/* カレンダー */}
-        <div className="grid grid-cols-7 gap-1 sm:gap-2">
-          {["日","月","火","水","木","金","土"].map((w) => (
-            <div key={w} className="py-1 text-center text-xs text-slate-500">{w}</div>
+        {/* 曜日ヘッダ（Mon-Sun） */}
+        <div className="grid grid-cols-7 gap-1 text-center text-xs text-slate-500">
+          {["月", "火", "水", "木", "金", "土", "日"].map((w) => (
+            <div key={w}>{w}</div>
           ))}
-          {weeks.flat().map((d, i) => {
-            if (!d) {
-              return <div key={i} className="h-10 sm:h-12 rounded-md bg-slate-50" />;
-            }
-            const ymd = ymdLocal(d);
-            const active = selected === ymd;
-            const marked = hasRecord(d);
-            return (
-              <button
-                key={i}
-                onClick={() => setSelected(ymd)}
-                className={`relative h-10 sm:h-12 rounded-md border text-sm hover:bg-slate-50 ${
-                  active ? "border-blue-500 ring-1 ring-blue-500" : "border-slate-200"
-                }`}
-              >
-                <span className="absolute left-1 top-1 text-[11px] text-slate-600">
-                  {d.getDate()}
-                </span>
-                {marked && (
-                  <span className="absolute bottom-1 right-1 inline-flex h-4 w-4 items-center justify-center rounded-full border border-blue-500 text-[10px] text-blue-600">
-                    ●
-                  </span>
-                )}
-              </button>
-            );
-          })}
+        </div>
+
+        {/* カレンダー本体 */}
+        <div className="mt-1 grid grid-cols-7 gap-1">
+          {weeks.map((row, ri) =>
+            row.map((d, ci) => {
+              const ymd = d ? ymdLocal(d) : "";
+              const has = hasRecord(d);
+              const isToday =
+                d &&
+                (() => {
+                  const t = new Date();
+                  const ymdT = ymdLocal(t);
+                  return ymdT === ymd;
+                })();
+
+              return (
+                <button
+                  key={`${ri}-${ci}`}
+                  className={[
+                    "h-16 rounded-md border p-1 text-left",
+                    has ? "border-green-400" : "border-slate-200",
+                    isToday ? "bg-yellow-50" : "",
+                    ymd === selectedYmd ? "ring-2 ring-blue-400" : "",
+                  ].join(" ")}
+                  onClick={() => (d ? setSelectedYmd(ymd) : void 0)}
+                >
+                  <div className="text-xs">{d ? d.getDate() : ""}</div>
+                  {has && <div className="mt-1 text-[10px] text-green-600">記録あり</div>}
+                </button>
+              );
+            })
+          )}
         </div>
       </Card>
 
-      {/* 選択日のサマリ */}
+      {/* 詳細パネル */}
       <div className="mt-4">
-        {!selectedRecord ? (
-          <Card className="p-3 text-sm text-slate-500">日付を選択すると、その日の記録を表示します。</Card>
-        ) : (
+        {selectedRecord && (
           <Card className="p-3">
-            <div className="mb-2 text-base font-semibold">{selected} の記録</div>
-            <div className="space-y-2">
+            <div className="text-sm text-slate-600">
+              <div className="mb-1">
+                <span className="font-medium">{selectedYmd}</span> の記録
+              </div>
+
+              {/* times */}
+              {selectedRecord.times && Object.entries(selectedRecord.times).length > 0 && (
+                <div className="mb-2">
+                  <div className="text-slate-500">完了時刻</div>
+                  {Object.entries(selectedRecord.times).map(([id, arr]) => (
+                    <div key={id} className="text-sm">
+                      <span className="font-medium">{nameOf(id)}</span>：
+                      {(arr || []).map((iso) => new Date(iso).toLocaleTimeString()).join(", ")}
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* counts */}
-              {selectedRecord.counts &&
-                Object.entries(selectedRecord.counts).map(([id, arr]) => (
-                  <div key={id} className="text-sm">
-                    <span className="font-medium">{nameOf(id)}</span>{" "}
-                    <span className="text-slate-500">（回数）</span>：{arr.filter((v) => (v ?? 0) > 0).join(", ")}
-                  </div>
-                ))}
+              {selectedRecord.counts && Object.entries(selectedRecord.counts).length > 0 && (
+                <div className="mb-2">
+                  <div className="text-slate-500">回数</div>
+                  {Object.entries(selectedRecord.counts).map(([id, arr]) => (
+                    <div key={id} className="text-sm">
+                      <span className="font-medium">{nameOf(id)}</span>：
+                      {(arr || []).map((n, i) => `S${i + 1}:${n}`).join(" / ")}
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* sets */}
-              {selectedRecord.sets &&
-                Object.entries(selectedRecord.sets).map(([id, arr]) => (
-                  <div key={id} className="text-sm">
-                    <span className="font-medium">{nameOf(id)}</span>{" "}
-                    <span className="text-slate-500">（セット）</span>：
-                    {arr.map((b, i) => (b ? `#${i + 1}` : null)).filter(Boolean).join(" ")}
-                  </div>
-                ))}
+              {selectedRecord.sets && Object.entries(selectedRecord.sets).length > 0 && (
+                <div className="mb-2">
+                  <div className="text-slate-500">セット完了</div>
+                  {Object.entries(selectedRecord.sets).map(([id, arr]) => (
+                    <div key={id} className="text-sm">
+                      <span className="font-medium">{nameOf(id)}</span>{" "}
+                      <span className="text-slate-500">（セット）</span>：
+                      {arr.map((b, i) => (b ? `#${i + 1}` : null)).filter(Boolean).join(" ")}
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {/* メモ */}
               {(selectedRecord.notesUpper || selectedRecord.notesLower || selectedRecord.notesEtc) && (
