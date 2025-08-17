@@ -211,7 +211,7 @@ export default function RecordTab() {
       setCurrentSig(calcRecordsSignature());
     } catch {}
 
-    // Portal アンカー取得
+    // Portal アンカー取得（タブの直上に用意した div）
     setBannerAnchor(document.getElementById("save-reminder-anchor") as HTMLElement | null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
