@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Textarea } from "@/components/ui/Textarea";
 import { Checkbox } from "@/components/ui/Checkbox";
@@ -15,7 +15,6 @@ import { loadDayRecord, saveDayRecord, loadJSON } from "@/lib/local-storage";
 import type {
   ExerciseItem,
   ExercisesByCategory as ExercisesGrouped,
-  ExercisesState,
   DayRecord,
   InputMode,
   Category,
@@ -43,7 +42,12 @@ function loadExercises(): ExercisesGrouped {
         enabled: Boolean(it.enabled ?? true),
         mode: (it.mode ?? it.inputMode ?? "check") as InputMode,
         inputMode: (it.inputMode ?? it.mode) as InputMode | undefined,
-        sets: typeof it.sets === "number" ? it.sets : (typeof it.checkCount === "number" ? it.checkCount : 3),
+        sets:
+          typeof it.sets === "number"
+            ? it.sets
+            : typeof it.checkCount === "number"
+            ? it.checkCount
+            : 3,
         checkCount: it.checkCount,
         repTarget: it.repTarget,
         order: it.order,
@@ -100,7 +104,7 @@ function makeSetArray(n: number): number[] {
 }
 
 /** ===== “空データで上書き”を避ける保険 ===== */
-function hasAnyData(r: DayRecord | undefined) {
+function hasAnyData(r: DayRecord | null | undefined) {
   if (!r) return false;
   const anySets =
     r.sets && Object.values(r.sets).some((arr) => (arr ?? []).some(Boolean));
@@ -109,10 +113,7 @@ function hasAnyData(r: DayRecord | undefined) {
   const anyTimes =
     r.times && Object.values(r.times).some((arr) => (arr ?? []).length > 0);
   const anyNotes =
-    (r.notesUpper ?? "") +
-    (r.notesLower ?? "") +
-    (r.notesEtc ?? "") +
-    ((r as any).notesOther ?? "");
+    (r.notesUpper ?? "") + (r.notesLower ?? "") + (r.notesEtc ?? "") + ((r as any).notesOther ?? "");
   return Boolean(anySets || anyCounts || anyTimes || anyNotes.trim());
 }
 
@@ -129,7 +130,7 @@ export default function RecordTab() {
 
   // 記録の初期値（notesは必須に寄せて空文字で用意）
   const [rec, setRec] = useState<DayRecord>(() => {
-    const loaded = loadDayRecord(todayStr) as DayRecord | undefined;
+    const loaded = loadDayRecord(todayStr) as DayRecord | null | undefined;
     const base: DayRecord =
       loaded ?? {
         date: todayStr,
@@ -146,8 +147,7 @@ export default function RecordTab() {
       notesUpper: base.notesUpper ?? "",
       notesLower: base.notesLower ?? "",
       notesEtc: base.notesEtc ?? "",
-      // notesOther は任意
-      ...(base as any).notesOther !== undefined ? { notesOther: (base as any).notesOther } : {},
+      ...(base.notesOther !== undefined ? { notesOther: base.notesOther } : {}),
     };
   });
 
@@ -161,13 +161,15 @@ export default function RecordTab() {
       notesUpper: next.notesUpper ?? "",
       notesLower: next.notesLower ?? "",
       notesEtc: next.notesEtc ?? "",
-      ...(next as any).notesOther !== undefined ? { notesOther: (next as any).notesOther } : {},
+      ...(next.notesOther !== undefined ? { notesOther: next.notesOther } : {}),
     };
 
-    const current = loadDayRecord(todayStr);
-    if (!hasAnyData(normalized) && hasAnyData(current)) {
-      setRec(current!); // 誤保存を回避して現状維持
-      return;
+    if (!hasAnyData(normalized)) {
+      const current = loadDayRecord(todayStr) as DayRecord | null | undefined;
+      if (current && hasAnyData(current)) {
+        setRec(current); // 誤保存を回避して現状維持
+        return;
+      }
     }
 
     setRec(normalized);
