@@ -1,3 +1,4 @@
+// src/tabs/RecordTab.tsx
 "use client";
 
 import React, { useMemo, useState } from "react";
@@ -19,6 +20,13 @@ import type {
   InputMode,
   Category,
 } from "@/lib/types";
+
+// notes* を必須stringとして保存側に合わせるための型（最小差分）
+type DayRecordStrict = Omit<DayRecord, "notesUpper" | "notesLower" | "notesEtc"> & {
+  notesUpper: string;
+  notesLower: string;
+  notesEtc: string;
+};
 
 /** ===== 端末ローカル日付ユーティリティ ===== */
 function toYmd(d: Date): string {
@@ -164,16 +172,14 @@ export default function RecordTab() {
       ...(next.notesOther !== undefined ? { notesOther: next.notesOther } : {}),
     };
 
-    if (!hasAnyData(normalized)) {
-      const current = loadDayRecord(todayStr) as DayRecord | null | undefined;
-      if (current && hasAnyData(current)) {
-        setRec(current); // 誤保存を回避して現状維持
-        return;
-      }
+    const current = loadDayRecord(todayStr) as DayRecord | null | undefined;
+    if (!hasAnyData(normalized) && hasAnyData(current ?? undefined)) {
+      if (current) setRec(current); // 誤保存を回避して現状維持
+      return;
     }
 
     setRec(normalized);
-    saveDayRecord(todayStr, normalized);
+    saveDayRecord(todayStr, normalized as DayRecordStrict);
   };
 
   // 完了時刻の更新
