@@ -19,8 +19,8 @@ const MEMO_EXAMPLE = "（例）アーチャープッシュアップも10回や�
 
 /** セルサイズ（チェック/回数とも同じサイズ） */
 const CELL = 52; // px
-const GAP_PX = 8; // gap-2 相当
-const GRID_WIDTH_PX = 3 * CELL + 2 * GAP_PX; // 1行3セル＋2ギャップを右寄せ
+const GAP_PX = 8;
+const GRID_WIDTH_PX = 3 * CELL + 2 * GAP_PX;
 
 /* === 端末タイムゾーンで YYYY-MM-DD を作る === */
 const ymdLocal = (d = new Date()) => {
@@ -42,7 +42,6 @@ type DayRecord = {
   notesOther?: string;
   sets: Record<string, boolean[]>;
   counts?: Record<string, number[]>;
-  /** 各セットで「正の入力（チェックor回数>0）」が行われたISO時刻 */
   times?: Record<string, (string | null)[]>;
 };
 
@@ -76,7 +75,7 @@ const COUNT_MAX = 99;
 type LastDoneMap = Record<string, string | undefined>;
 type LastPrevMap = Record<string, string | undefined>;
 const KEY_V1 = "lastDone-v1";
-const KEY_V0 = "lastDone-v0"; // 互換キー
+const KEY_V0 = "lastDone-v0";
 const KEY_PREV = "lastDone-prev";
 const KEY_ALT = "lastDone";
 
@@ -103,7 +102,35 @@ function CalendarIcon({ size = 18 }: { size?: number }) {
   );
 }
 
-/* 端末保存（全量バックアップ）：このドメインの localStorage を全部JSON保存 */
+/* 画像フォールバック（存在するパスを順番に探す） */
+const ICON_CANDIDATES = [
+  "/icons/icon-192x192.png",
+  "/icon-192x192.png",
+  "/icons/icon-192.png",
+  "/android-chrome-192x192.png",
+  "/apple-touch-icon.png",
+  "/favicon.ico",
+];
+function HeaderIcon() {
+  const [idx, setIdx] = useState(0);
+  const src = ICON_CANDIDATES[idx] ?? "";
+  // すべて失敗したら絵文字で代替
+  if (!src) {
+    return (
+      <div className="w-10 h-10 flex items-center justify-center text-2xl">💪</div>
+    );
+  }
+  return (
+    <img
+      src={src}
+      alt="icon"
+      className="w-10 h-10 rounded-md"
+      onError={() => setIdx((i) => i + 1)}
+    />
+  );
+}
+
+/* 端末保存（全量バックアップ） */
 function saveAllLocalStorageToFile() {
   const data: Record<string, string | null> = {};
   for (let i = 0; i < window.localStorage.length; i++) {
@@ -130,7 +157,7 @@ function saveAllLocalStorageToFile() {
   } catch {}
 }
 
-/* 復元（JSONファイル→ localStorage に書き戻し） */
+/* 復元（JSON→ localStorage） */
 async function restoreAllFromFile(file: File) {
   const text = await file.text();
   const json = JSON.parse(text);
@@ -155,13 +182,13 @@ async function restoreAllFromFile(file: File) {
 function shouldRemindBackup(): boolean {
   const savedAt = window.localStorage.getItem(KEY_BACKUP_SAVED_AT);
   const changedAt = window.localStorage.getItem(KEY_LAST_CHANGED_AT);
-  if (!changedAt) return false; // 変更なし
+  if (!changedAt) return false;
   if (!savedAt) return true;
   const weekMs = 7 * 24 * 3600 * 1000;
   return Date.now() - Date.parse(savedAt) > weekMs && Date.parse(changedAt) > Date.parse(savedAt);
 }
 
-/* 変更マーク（保存促しに使う） */
+/* 変更マーク（保存促し用） */
 function markChangedNow() {
   try {
     window.localStorage.setItem(KEY_LAST_CHANGED_AT, new Date().toISOString());
@@ -223,7 +250,7 @@ export default function RecordTab() {
         notesOther: loaded.notesOther ?? "",
         sets: loaded.sets ?? {},
         counts: loaded.counts ?? {},
-        times: loaded.times ?? {}, // 後方互換
+        times: loaded.times ?? {},
       });
     }
   }, []);
@@ -248,12 +275,11 @@ export default function RecordTab() {
   const writeLastAll = (map: LastDoneMap, prev: LastPrevMap) => {
     try {
       window.localStorage.setItem(KEY_V1, JSON.stringify(map));
-      window.localStorage.setItem(KEY_V0, JSON.stringify(map)); // 互換
+      window.localStorage.setItem(KEY_V0, JSON.stringify(map));
       window.localStorage.setItem(KEY_PREV, JSON.stringify(prev));
     } catch {}
   };
 
-  /** 当日の times[*] から「その種目の最新実施時刻（最大）」を計算し、last-done を同期 */
   const recomputeAndSyncLastDone = (exerciseId: string, record: DayRecord) => {
     const arr = record.times?.[exerciseId] ?? [];
     let latestTs = 0;
@@ -374,7 +400,7 @@ export default function RecordTab() {
   /* 見出し行：タイトル左、日付＋ボタン群右 */
   const Header = () => (
     <div className="flex items-center gap-3 mb-4">
-      <img src="/icons/icon-192x192.png" alt="icon" className="w-10 h-10 rounded-md" />
+      <HeaderIcon />
       <h1 className="text-lg font-bold">筋トレ記録</h1>
       <div className="ml-auto flex items-center gap-2 text-slate-600">
         <CalendarIcon />
@@ -383,13 +409,13 @@ export default function RecordTab() {
           className="ml-3 px-3 py-1 text-sm rounded bg-slate-900 text-white"
           onClick={saveAllLocalStorageToFile}
         >
-          端末に保存（JSON）
+          保存
         </button>
         <button
           className="px-3 py-1 text-sm rounded border border-slate-300"
           onClick={onClickRestore}
         >
-          バックアップから復元
+          復元
         </button>
         <input
           ref={fileRef}
@@ -406,11 +432,11 @@ export default function RecordTab() {
     <div className="space-y-5">
       <Header />
 
-      {/* バックアップの促し（1週間以上保存なし＆変更あり） */}
+      {/* バックアップの促し */}
       {showRemind && (
         <Card className="p-4 bg-amber-50 text-amber-900">
           <div className="text-sm leading-relaxed">
-            最近、端末へのバックアップが1週間以上行われていません。変更内容を失わないよう、端末に保存をおすすめします。
+            最近、端末へのバックアップが1週間以上行われていません。変更内容を失わないよう、保存をおすすめします。
           </div>
           <div className="mt-3 flex gap-3">
             <button
@@ -420,7 +446,7 @@ export default function RecordTab() {
               }}
               className="px-4 py-2 rounded bg-slate-900 text-white"
             >
-              端末に保存（JSON）
+              保存
             </button>
             <button
               onClick={() => setShowRemind(false)}
@@ -455,7 +481,6 @@ export default function RecordTab() {
 
               return (
                 <div key={ex.id} className="border-b last:border-b-0 py-3">
-                  {/* 1行目：種目名 + インターバル */}
                   <div className="flex items-center gap-3">
                     <div className="text-[15px] sm:text-base font-medium">{ex.name}</div>
                     <div className="ml-auto w-full sm:w-auto text-sm text-slate-500 text-right">
@@ -463,7 +488,6 @@ export default function RecordTab() {
                     </div>
                   </div>
 
-                  {/* 2行目：右寄せ 3列グリッド */}
                   <div className="mt-2 ml-auto" style={{ width: GRID_WIDTH_PX }}>
                     {mode === "count" ? (
                       <div className="grid grid-cols-3 gap-2">
@@ -520,7 +544,6 @@ export default function RecordTab() {
               );
             })}
 
-            {/* メモ（カテゴリごと） */}
             <div className="mt-3">
               <label className="block text-sm text-slate-600 mb-1">
                 {cat === "upper" ? "上半身メモ" : cat === "lower" ? "下半身メモ" : "その他メモ"}
