@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Textarea } from "@/components/ui/Textarea";
 import { Checkbox } from "@/components/ui/Checkbox";
@@ -13,520 +13,300 @@ import {
 } from "@/components/ui/Select";
 import { loadDayRecord, saveDayRecord, loadJSON } from "@/lib/local-storage";
 
-/* ===== メモ欄の記述例（全カテゴリ共通） ===== */
-const MEMO_EXAMPLE = "（例）アーチャープッシュアップも10回やった";
-/* ======================================== */
-
-/** セル基準サイズ */
-const CELL = 52; // px
-const GAP_PX = 8;
-const GRID_WIDTH_PX = 3 * CELL + 2 * GAP_PX;
-
-/* === 端末タイムゾーンで YYYY-MM-DD を作る === */
-const ymdLocal = (d = new Date()) => {
+/** ===== 端末ローカル日付ユーティリティ ===== */
+const ymdLocal = (d: Date) => {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  const da = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${da}`;
 };
-const todayStr = ymdLocal();
-const fmtDateJP = (iso: string) => {
-  const [y, m, d] = iso.split("-").map(Number);
-  return `${y}年${m}月${d}日`;
+const todayStr = ymdLocal(new Date());
+
+/** ===== 型（最低限） ===== */
+type ExerciseItem = {
+  id: string;
+  name: string;
+  category: "upper" | "lower" | "etc";
+  enabled?: boolean;
+  mode?: "check" | "count";
+  sets?: number;        // 1..5
+  repTarget?: number;   // 回数入力時のノルマ
+  order?: number;
+};
+
+type ExercisesState = {
+  upper: ExerciseItem[];
+  lower: ExerciseItem[];
+  etc: ExerciseItem[];
 };
 
 type DayRecord = {
   date: string;
+  // 完了時刻（ISO文字列）: UI でチェック/回数入力した瞬間に push
+  times?: Record<string, string[]>;
+  // チェック/回数の保存
+  sets?: Record<string, boolean[]>;  // check 用
+  counts?: Record<string, number[]>; // count 用
+  // メモ（カテゴリ別）
   notesUpper?: string;
   notesLower?: string;
-  notesOther?: string;
-  sets: Record<string, boolean[]>;
-  counts?: Record<string, number[]>;
-  times?: Record<string, (string | null)[]>;
+  notesEtc?: string;
 };
 
-type ExercisesState = Record<
-  string,
-  { id: string; name: string; sets: number }[]
->;
+/** ===== メモ欄の記述例 ===== */
+const MEMO_EXAMPLE = "（例）アーチャープッシュアップも10回やった";
 
-type SettingsItem = {
-  id: string;
-  name: string;
-  inputMode?: "check" | "count";
-  checkCount?: number;
-  sets?: number;
-  repTarget?: number;
-  order?: number;
-  category: "upper" | "lower" | "other";
-  enabled?: boolean;
-};
-type Settings = { items?: SettingsItem[] };
-type Category = "upper" | "lower" | "other";
-type InputMode = "check" | "count";
-type MetaMap = Record<
-  string,
-  { mode: InputMode; setCount: number; repTarget?: number }
->;
-
-const COUNT_MAX = 99;
-
-/* 最終実施保持（ローカルストレージキー） */
-type LastDoneMap = Record<string, string | undefined>;
-type LastPrevMap = Record<string, string | undefined>;
-const KEY_V1 = "lastDone-v1";
-const KEY_V0 = "lastDone-v0";
-const KEY_PREV = "lastDone-prev";
-const KEY_ALT = "lastDone";
-
-/* 記録タブのバックアップ・変更監視キー */
-const KEY_BACKUP_SAVED_AT = "records:backup:lastSavedAt";
-const KEY_LAST_CHANGED_AT = "records:lastChangeAt";
-
-function CalendarIcon({ size = 18 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      className="text-slate-600"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <rect x="3" y="4" width="18" height="17" rx="2" />
-      <path d="M8 2v4M16 2v4M3 10h18" />
-    </svg>
-  );
-}
-
-/* 端末保存（全量バックアップ） */
-function saveAllLocalStorageToFile() {
-  const data: Record<string, string | null> = {};
-  for (let i = 0; i < window.localStorage.length; i++) {
-    const k = window.localStorage.key(i)!;
-    data[k] = window.localStorage.getItem(k);
-  }
-  const payload = {
-    type: "workout-records-backup",
-    exportedAt: new Date().toISOString(),
-    data,
+/** ===== 設定ロード ===== */
+function loadExercises(): ExercisesState {
+  // 既存の KEY は "exercises" 前提
+  const raw = loadJSON<any>("exercises");
+  const fallback: ExercisesState = { upper: [], lower: [], etc: [] };
+  if (!raw) return fallback;
+  const pick = (arr?: any[]) =>
+    Array.isArray(arr)
+      ? arr.map((it: any) => ({
+          id: String(it.id ?? ""),
+          name: String(it.name ?? ""),
+          category: (it.category ?? "etc") as ExerciseItem["category"],
+          enabled: Boolean(it.enabled ?? true),
+          mode: (it.mode ?? "check") as ExerciseItem["mode"],
+          sets: Number(it.sets ?? 3),
+          repTarget: it.mode === "count" ? Number(it.repTarget ?? 10) : undefined,
+          order: Number(it.order ?? 1),
+        }))
+      : [];
+  return {
+    upper: pick(raw.upper).sort((a,b)=> (a.order??0)-(b.order??0)),
+    lower: pick(raw.lower).sort((a,b)=> (a.order??0)-(b.order??0)),
+    etc:   pick(raw.etc).sort((a,b)=> (a.order??0)-(b.order??0)),
   };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], {
-    type: "application/json",
-  });
-  const a = document.createElement("a");
-  const ymd = todayStr.replaceAll("-", "");
-  a.href = URL.createObjectURL(blob);
-  a.download = `workout-records-backup-${ymd}.json`;
-  a.click();
-  URL.revokeObjectURL(a.href);
-
-  try {
-    window.localStorage.setItem(KEY_BACKUP_SAVED_AT, new Date().toISOString());
-  } catch {}
 }
 
-/* 復元（JSON→ localStorage） */
-async function restoreAllFromFile(file: File) {
-  const text = await file.text();
-  const json = JSON.parse(text);
-  if (!json || json.type !== "workout-records-backup" || !json.data) {
-    alert("バックアップファイルの形式が不正です。");
-    return;
-  }
-  const data: Record<string, string | null> = json.data;
-  for (const [k, v] of Object.entries(data)) {
-    if (v === null) {
-      window.localStorage.removeItem(k);
-    } else {
-      window.localStorage.setItem(k, v);
-    }
-  }
-  window.localStorage.setItem(KEY_BACKUP_SAVED_AT, new Date().toISOString());
-  alert("復元が完了しました。ページを再読み込みします。");
-  window.location.reload();
-}
-
-/* 直近のバックアップから1週間以上経過＆変更ありなら true */
-function shouldRemindBackup(): boolean {
-  const savedAt = window.localStorage.getItem(KEY_BACKUP_SAVED_AT);
-  const changedAt = window.localStorage.getItem(KEY_LAST_CHANGED_AT);
-  if (!changedAt) return false;
-  if (!savedAt) return true;
-  const weekMs = 7 * 24 * 3600 * 1000;
-  return Date.now() - Date.parse(savedAt) > weekMs && Date.parse(changedAt) > Date.parse(savedAt);
-}
-
-/* 変更マーク（保存促し用） */
-function markChangedNow() {
-  try {
-    window.localStorage.setItem(KEY_LAST_CHANGED_AT, new Date().toISOString());
-  } catch {}
+/** ===== インターバル（最新完了時刻との差）h ===== */
+function hoursSince(iso?: string): number | null {
+  if (!iso) return null;
+  const last = new Date(iso).getTime();
+  if (Number.isNaN(last)) return null;
+  const now = Date.now();
+  return Math.max(0, Math.floor((now - last) / (1000 * 60 * 60)));
 }
 
 export default function RecordTab() {
-  /* 設定→メタ */
-  const [meta, setMeta] = useState<MetaMap>({});
-  useEffect(() => {
-    const settings = loadJSON<Settings>("settings-v1");
-    const items = settings?.items?.filter((x) => x.enabled !== false) ?? [];
-    const m: MetaMap = {};
-    for (const it of items) {
-      const mode: InputMode = it.inputMode ?? "check";
-      const setCount = Math.max(1, it.checkCount ?? it.sets ?? 3);
-      m[it.id] = { mode, setCount, repTarget: it.repTarget };
-    }
-    setMeta(m);
-  }, []);
-
-  /* カテゴリ別配列 */
-  const [exercises, setExercises] = useState<ExercisesState | null>(null);
-  useEffect(() => {
-    if (Object.keys(meta).length === 0) return;
-    const settings = loadJSON<Settings>("settings-v1");
-    const items = settings?.items?.filter((x) => x.enabled !== false) ?? [];
-    const grouped: ExercisesState = { upper: [], lower: [], other: [] } as any;
-
-    const sorted = [...items].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-    for (const it of sorted) {
-      grouped[it.category].push({
-        id: it.id,
-        name: it.name,
-        sets: meta[it.id]?.setCount ?? it.sets ?? 3,
-      });
-    }
-    setExercises(grouped);
-  }, [meta]);
-
-  /* 当日レコード */
-  const [dayRecord, setDayRecord] = useState<DayRecord>({
-    date: todayStr,
-    notesUpper: "",
-    notesLower: "",
-    notesOther: "",
-    sets: {},
-    counts: {},
-    times: {},
+  const [ex, setEx] = useState<ExercisesState>({ upper: [], lower: [], etc: [] });
+  const [rec, setRec] = useState<DayRecord>(() => {
+    return (
+      (loadDayRecord(todayStr) as DayRecord | null) ?? {
+        date: todayStr,
+        times: {},
+        sets: {},
+        counts: {},
+      }
+    );
   });
 
   useEffect(() => {
-    const loaded = (loadDayRecord as any)(todayStr) as Partial<DayRecord> | null;
-    if (loaded) {
-      setDayRecord({
-        date: todayStr,
-        notesUpper: loaded.notesUpper ?? "",
-        notesLower: loaded.notesLower ?? "",
-        notesOther: loaded.notesOther ?? "",
-        sets: loaded.sets ?? {},
-        counts: loaded.counts ?? {},
-        times: loaded.times ?? {},
-      });
-    }
+    setEx(loadExercises());
   }, []);
 
-  const persist = (rec: DayRecord) => {
-    setDayRecord(rec);
-    (saveDayRecord as any)(todayStr, rec);
-    markChangedNow();
+  // 保存ヘルパ
+  const persist = (next: DayRecord) => {
+    setRec(next);
+    saveDayRecord(todayStr, next);
   };
 
-  /* 最終実施（インターバル表示用） */
-  const [lastDone, setLastDone] = useState<LastDoneMap>({});
-  const [lastPrev, setLastPrev] = useState<LastPrevMap>({});
-  useEffect(() => {
-    const v1 = loadJSON<LastDoneMap>(KEY_V1);
-    const v0 = loadJSON<LastDoneMap>(KEY_V0);
-    const alt = loadJSON<LastDoneMap>(KEY_ALT);
-    setLastDone(v1 ?? v0 ?? alt ?? {});
-    setLastPrev(loadJSON<LastPrevMap>(KEY_PREV) ?? {});
-  }, []);
-
-  const writeLastAll = (map: LastDoneMap, prev: LastPrevMap) => {
-    try {
-      window.localStorage.setItem(KEY_V1, JSON.stringify(map));
-      window.localStorage.setItem(KEY_V0, JSON.stringify(map));
-      window.localStorage.setItem(KEY_PREV, JSON.stringify(prev));
-    } catch {}
-  };
-
-  const recomputeAndSyncLastDone = (exerciseId: string, record: DayRecord) => {
-    const arr = record.times?.[exerciseId] ?? [];
-    let latestTs = 0;
-    for (const t of arr) {
-      if (!t) continue;
-      const ts = Date.parse(t as string);
-      if (!Number.isNaN(ts)) latestTs = Math.max(latestTs, ts);
-    }
-    const latest = latestTs ? new Date(latestTs).toISOString() : undefined;
-
-    setLastDone((cur) => {
-      if (latest) {
-        if (cur[exerciseId] !== latest) {
-          setLastPrev((pp) => {
-            const nextPrev = { ...pp, [exerciseId]: cur[exerciseId] };
-            const next = { ...cur, [exerciseId]: latest };
-            writeLastAll(next, nextPrev);
-            return nextPrev;
-          });
-          return { ...cur, [exerciseId]: latest };
+  // 直近の完了時刻（種目ごと）
+  const lastDoneMap = useMemo(() => {
+    const m = new Map<string, string | undefined>();
+    const t = rec.times ?? {};
+    for (const [id, arr] of Object.entries(t)) {
+      // 配列の中で最新（最大）を採用
+      let latest: string | undefined = undefined;
+      if (Array.isArray(arr)) {
+        for (const v of arr) {
+          if (!v) continue;
+          if (!latest || v > latest) latest = v;
         }
-        return cur;
-      } else {
-        if (cur[exerciseId]) {
-          const next = { ...cur };
-          delete next[exerciseId];
-          writeLastAll(next, lastPrev);
-          return next;
-        }
-        return cur;
       }
-    });
-  };
+      if (latest) m.set(id, latest);
+    }
+    return m;
+  }, [rec.times]);
 
-  /* チェック切り替え */
-  const toggleSet = (exerciseId: string, setIndex: number, on?: boolean) => {
-    const sets = { ...(dayRecord.sets || {}) };
-    const arr = [...(sets[exerciseId] ?? [])];
-    const nowOn = on ?? !arr[setIndex];
+  // UI：セクション共通レンダラ
+  const renderCategory = (key: "upper" | "lower" | "etc", label: string) => {
+    const items = ex[key].filter((i) => i.enabled !== false);
 
-    const needLen = Math.max(setIndex + 1, arr.length);
-    for (let i = 0; i < needLen; i++) if (arr[i] == null) arr[i] = false;
+    return (
+      <Card key={key} className="mb-4 p-3">
+        <div className="mb-2 text-base font-bold">{label}</div>
 
-    arr[setIndex] = nowOn;
-    sets[exerciseId] = arr;
+        <div className="space-y-3">
+          {items.map((it) => {
+            const id = it.id;
+            const setsArr = rec.sets?.[id] ?? [];
+            const cntsArr = rec.counts?.[id] ?? [];
+            const latestIso = lastDoneMap.get(id);
+            const hours = hoursSince(latestIso ?? undefined);
 
-    const times = { ...(dayRecord.times || {}) };
-    const tArr = [...(times[exerciseId] ?? [])];
-    tArr[setIndex] = nowOn ? new Date().toISOString() : null;
-    times[exerciseId] = tArr;
+            const nowISO = new Date().toISOString();
 
-    const next: DayRecord = { ...dayRecord, sets, times };
-    persist(next);
-    recomputeAndSyncLastDone(exerciseId, next);
-  };
+            const setSetsArr = (a: boolean[]) =>
+              persist({
+                ...rec,
+                sets: { ...(rec.sets ?? {}), [id]: a },
+                times: {
+                  ...(rec.times ?? {}),
+                  [id]: (rec.times?.[id] ?? []).slice(), // 触らない
+                },
+              });
 
-  /* 回数選択 */
-  const changeCount = (exerciseId: string, setIndex: number, value: string) => {
-    let n = Math.floor(Number(value || "0"));
-    if (!Number.isFinite(n) || n < 0) n = 0;
+            const setCountsArr = (a: number[]) =>
+              persist({
+                ...rec,
+                counts: { ...(rec.counts ?? {}), [id]: a },
+                times: {
+                  ...(rec.times ?? {}),
+                  [id]: (rec.times?.[id] ?? []).slice(), // 触らない
+                },
+              });
 
-    const counts = { ...(dayRecord.counts || {}) };
-    const cArr = [...(counts[exerciseId] ?? [])];
-    const needLen = Math.max(setIndex + 1, cArr.length);
-    for (let i = 0; i < needLen; i++) if (cArr[i] == null) cArr[i] = 0;
-    cArr[setIndex] = n;
-    counts[exerciseId] = cArr;
+            // チェックのトグル時：true にしたら現在時刻を記録。false にしたらそのセットの時刻は削除。
+            const toggleCheck = (idx: number) => {
+              const next = [...setsArr];
+              next[idx] = !next[idx];
+              // times を同期
+              const times = (rec.times?.[id] ?? []).slice();
+              if (next[idx]) {
+                times[idx] = nowISO;
+              } else {
+                times[idx] = ""; // 空なら無視される
+              }
+              persist({
+                ...rec,
+                sets: { ...(rec.sets ?? {}), [id]: next },
+                times: { ...(rec.times ?? {}), [id]: times },
+              });
+            };
 
-    const times = { ...(dayRecord.times || {}) };
-    const tArr = [...(times[exerciseId] ?? [])];
-    tArr[setIndex] = n > 0 ? new Date().toISOString() : null;
-    times[exerciseId] = tArr;
+            // 回数入力：値が 0 以上なら時刻を記録、空/0 に戻したら時刻を消す
+            const changeCount = (idx: number, val: number) => {
+              const next = [...cntsArr];
+              next[idx] = val;
+              const times = (rec.times?.[id] ?? []).slice();
+              if (val > 0) {
+                times[idx] = nowISO;
+              } else {
+                times[idx] = "";
+              }
+              persist({
+                ...rec,
+                counts: { ...(rec.counts ?? {}), [id]: next },
+                times: { ...(rec.times ?? {}), [id]: times },
+              });
+            };
 
-    const next: DayRecord = { ...dayRecord, counts, times };
-    persist(next);
-    recomputeAndSyncLastDone(exerciseId, next);
-  };
+            // 表示セット数
+            const n = Math.max(1, Math.min(5, Number(it.sets ?? 3)));
 
-  /* ノート */
-  const handleCatNotesChange = (cat: Category, value: string) => {
-    if (cat === "upper") return persist({ ...dayRecord, notesUpper: value ?? "" });
-    if (cat === "lower") return persist({ ...dayRecord, notesLower: value ?? "" });
-    return persist({ ...dayRecord, notesOther: value ?? "" });
-  };
-
-  /* ラベル */
-  const hoursSince = (iso?: string): number | null => {
-    if (!iso) return null;
-    const t = Date.parse(iso);
-    if (Number.isNaN(t)) return null;
-    return Math.max(0, Math.floor((Date.now() - t) / 3600000));
-  };
-  const recoveryText = (exerciseId: string) => {
-    const h = hoursSince(lastDone[exerciseId]);
-    if (h == null) return "—";
-    if (h < 1) return "<1H";
-    return `${h}H`;
-  };
-
-  /* 復元ファイル入力 */
-  const fileRef = useRef<HTMLInputElement>(null);
-  const onClickRestore = () => fileRef.current?.click();
-  const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    await restoreAllFromFile(f);
-  };
-
-  const [showRemind, setShowRemind] = useState(false);
-  useEffect(() => {
-    setShowRemind(shouldRemindBackup());
-  }, []);
-
-  if (!exercises) {
-    return <div>種目データがありません。（設定タブで種目を追加してください）</div>;
-  }
-
-  /* ============ ヘッダー（アイコン＆タイトルなし、折返しなし） ============ */
-  const Header = () => (
-    <div className="mb-4 flex items-center gap-2 whitespace-nowrap overflow-x-auto">
-      <CalendarIcon />
-      <span className="text-sm text-slate-700">{fmtDateJP(todayStr)}</span>
-      <button
-        className="ml-2 px-3 py-1 text-sm rounded bg-slate-900 text-white"
-        onClick={saveAllLocalStorageToFile}
-      >
-        保存
-      </button>
-      <button
-        className="px-3 py-1 text-sm rounded border border-slate-300"
-        onClick={onClickRestore}
-      >
-        復元
-      </button>
-      <input
-        ref={fileRef}
-        type="file"
-        accept="application/json"
-        className="hidden"
-        onChange={onFile}
-      />
-    </div>
-  );
-  /* ====================================================================== */
-
-  return (
-    <div className="space-y-5">
-      <Header />
-
-      {/* バックアップの促し */}
-      {showRemind && (
-        <Card className="p-4 bg-amber-50 text-amber-900">
-          <div className="text-sm leading-relaxed">
-            最近、端末へのバックアップが1週間以上行われていません。変更内容を失わないよう、保存をおすすめします。
-          </div>
-          <div className="mt-3 flex gap-3">
-            <button
-              onClick={() => {
-                saveAllLocalStorageToFile();
-                setShowRemind(false);
-              }}
-              className="px-4 py-2 rounded bg-slate-900 text-white"
-            >
-              保存
-            </button>
-            <button
-              onClick={() => setShowRemind(false)}
-              className="px-4 py-2 rounded border border-slate-300"
-            >
-              後で
-            </button>
-          </div>
-        </Card>
-      )}
-
-      {Object.entries(exercises).map(([category, categoryExercises]) => {
-        const cat = category as Category;
-        const notesValue =
-          cat === "upper"
-            ? dayRecord.notesUpper ?? ""
-            : cat === "lower"
-            ? dayRecord.notesLower ?? ""
-            : dayRecord.notesOther ?? "";
-
-        return (
-          <Card key={category} className="p-4">
-            <h2 className="text-base font-bold mb-3">
-              {cat === "upper" ? "上半身トレ" : cat === "lower" ? "下半身トレ" : "その他"}
-            </h2>
-
-            {categoryExercises.map((ex) => {
-              const m = meta[ex.id];
-              const mode = m?.mode ?? "check";
-              const setCount = m?.setCount ?? ex.sets ?? 3;
-              const repTarget = m?.repTarget;
-
-              return (
-                <div key={ex.id} className="border-b last:border-b-0 py-3">
-                  <div className="flex items-center gap-3">
-                    <div className="text-[15px] sm:text-base font-medium">{ex.name}</div>
-                    <div className="ml-auto w-full sm:w-auto text-sm text-slate-500 text-right">
-                      前回からのインターバル：{recoveryText(ex.id)}
-                    </div>
-                  </div>
-
-                  <div className="mt-2 ml-auto" style={{ width: GRID_WIDTH_PX }}>
-                    {mode === "count" ? (
-                      <div className="grid grid-cols-3 gap-2">
-                        {Array.from({ length: setCount }).map((_, idx) => {
-                          const cur = dayRecord.counts?.[ex.id]?.[idx] ?? 0;
-                          return (
-                            <Select
-                              key={idx}
-                              value={String(cur)}
-                              onValueChange={(v) => changeCount(ex.id, idx, v)}
-                            >
-                              <SelectTrigger
-                                className="h-[52px] w-[52px] text-base justify-center"
-                                style={{ width: CELL, height: CELL }}
-                              >
-                                <SelectValue
-                                  placeholder={repTarget != null ? String(repTarget) : undefined}
-                                />
-                              </SelectTrigger>
-                              <SelectContent className="max-h-64">
-                                {Array.from({ length: COUNT_MAX + 1 }, (_, n) => (
-                                  <SelectItem key={n} value={String(n)}>
-                                    {n}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-3 gap-2">
-                        {Array.from({ length: setCount }).map((_, idx) => {
-                          const on = !!dayRecord.sets?.[ex.id]?.[idx];
-                          return (
-                            <button
-                              key={idx}
-                              onClick={() => toggleSet(ex.id, idx)}
-                              className="inline-flex items-center justify-center rounded-md border border-slate-300"
-                              style={{ width: CELL, height: CELL }}
-                            >
-                              <Checkbox
-                                checked={on}
-                                onCheckedChange={(v) => toggleSet(ex.id, idx, !!v)}
-                                className="w-[26px] h-[26px]"
-                              />
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
+            return (
+              <div key={id} className="rounded-md border border-slate-200 p-2">
+                <div className="mb-1 flex items-center justify-between">
+                  <div className="text-[15px] font-medium">{it.name}</div>
+                  <div className="text-xs text-slate-500">
+                    前回からのインターバル：{hours == null ? "-" : `${hours}H`}
                   </div>
                 </div>
-              );
-            })}
 
-            <div className="mt-3">
-              <label className="block text-sm text-slate-600 mb-1">
-                {cat === "upper" ? "上半身メモ" : cat === "lower" ? "下半身メモ" : "その他メモ"}
-              </label>
-              <Textarea
-                className="text-sm"
-                value={notesValue}
-                onChange={(e) => handleCatNotesChange(cat, e.target.value)}
-                placeholder={MEMO_EXAMPLE}
-              />
-            </div>
-          </Card>
-        );
-      })}
+                {/* 入力ブロック（チェック or 回数） */}
+                {it.mode !== "count" ? (
+                  // チェックモード
+                  <div className="grid grid-cols-3 gap-2 sm:grid-cols-3">
+                    {Array.from({ length: n }, (_, i) => (
+                      <label key={i} className="flex items-center justify-center gap-2 rounded-md border p-2">
+                        <Checkbox
+                          className="h-[24px] w-[24px]"
+                          checked={!!setsArr[i]}
+                          onCheckedChange={() => toggleCheck(i)}
+                        />
+                        <span className="text-sm text-slate-600">{i + 1}セット</span>
+                      </label>
+                    ))}
+                  </div>
+                ) : (
+                  // 回数入力モード（セレクト）
+                  <div className="grid grid-cols-3 gap-2 sm:grid-cols-3">
+                    {Array.from({ length: n }, (_, i) => (
+                      <Select
+                        key={i}
+                        value={String(cntsArr[i] ?? "")}
+                        onValueChange={(v) => changeCount(i, Number(v || 0))}
+                      >
+                        <SelectTrigger className="w-full h-[40px] justify-end pr-3">
+                          <SelectValue placeholder={it.repTarget ? `ノルマ ${it.repTarget}` : "回数"} />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-60">
+                          <SelectItem value="">未入力</SelectItem>
+                          {Array.from({ length: 99 }, (_, k) => k + 1).map((v) => (
+                            <SelectItem key={v} value={String(v)}>
+                              {v}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* メモ欄 */}
+        <div className="mt-3">
+          <label className="mb-1 block text-sm text-slate-600">
+            メモ（{label}） <span className="text-slate-400"> {MEMO_EXAMPLE}</span>
+          </label>
+          <Textarea
+            className="text-sm"
+            value={
+              key === "upper"
+                ? rec.notesUpper ?? ""
+                : key === "lower"
+                ? rec.notesLower ?? ""
+                : rec.notesEtc ?? ""
+            }
+            onChange={(e) =>
+              persist({
+                ...rec,
+                notesUpper: key === "upper" ? e.target.value : rec.notesUpper,
+                notesLower: key === "lower" ? e.target.value : rec.notesLower,
+                notesEtc: key === "etc" ? e.target.value : rec.notesEtc,
+              })
+            }
+            placeholder={MEMO_EXAMPLE}
+          />
+        </div>
+      </Card>
+    );
+  };
+
+  // ====== 表示日付（右肩のみ表示／保存・復元UIは無し） ======
+  const displayDate = useMemo(() => {
+    const d = new Date();
+    const w = ["日","月","火","水","木","金","土"][d.getDay()];
+    return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}(${w})`;
+  }, []);
+
+  return (
+    <div className="p-4 sm:p-6">
+      {/* ヘッダー：右肩に日付のみ（保存/復元UIは削除） */}
+      <div className="mb-4 flex items-center justify-end text-slate-600 whitespace-nowrap">
+        {displayDate}
+      </div>
+
+      {renderCategory("upper", "上半身")}
+      {renderCategory("lower", "下半身")}
+      {renderCategory("etc", "その他")}
     </div>
   );
 }
