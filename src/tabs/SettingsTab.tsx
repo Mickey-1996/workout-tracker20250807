@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
+import { useEffect, useState } from "react";
+import { Card } from "@/components/ui/Card";
+import { Textarea } from "@/components/ui/Textarea";
 import { Checkbox } from "@/components/ui/Checkbox";
 import {
   Select,
@@ -11,386 +11,440 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/Select";
-import { Card } from "@/components/ui/Card";
+import { loadDayRecord, saveDayRecord, loadJSON } from "@/lib/local-storage";
 
-import type { Category, ExerciseItem, InputMode } from "@/lib/types";
-import { loadJSON, saveJSON } from "@/lib/local-storage";
-import { defaultExercises } from "@/lib/exercises-default";
+/* ========= メモ欄の記述例（全カテゴリ共通） ========= */
+const MEMO_EXAMPLE = "（例）アーチャープッシュアップも10回やった";
+/* ================================================ */
 
-const SETTINGS_KEY = "settings-v1";
+/** セルサイズ（チェック/回数とも同じサイズ：約1.3倍） */
+const CELL = 52; // px
+const GAP_PX = 8; // gap-2 相当
+const GRID_WIDTH_PX = 3 * CELL + 2 * GAP_PX; // 1行3セル＋2ギャップを右寄せ
 
-/** UIで使う拡張（保存形式は既存と互換） */
-type ExtendedExerciseItem = ExerciseItem & {
-  enabled?: boolean;
-  order?: number;
-  checkCount?: number; // (= sets 互換)
-  sets?: number;
-  inputMode?: InputMode; // "check" | "count"
-  repTarget?: number;    // 回数入力モード時のノルマ回数（1..99）
+type DayRecord = {
+  date: string;
+  notesUpper?: string;
+  notesLower?: string;
+  notesOther?: string;
+  sets: Record<string, boolean[]>;
+  counts?: Record<string, number[]>;
+  /** 追加：各セットの「正の入力（チェックON or 回数>0）」が最後に行われたISO時刻 */
+  times?: Record<string, (string | null)[]>;
 };
-type Settings = { items: ExtendedExerciseItem[] };
 
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-const SNOOZE_MS = 48 * 60 * 60 * 1000;
+type ExercisesState = Record<
+  string,
+  { id: string; name: string; sets: number }[]
+>;
 
-/* ====== 変更検知・バックアップ促し ====== */
-function nowMs() { return Date.now(); }
-function getMs(key: string) {
-  if (typeof window === "undefined") return 0;
-  const v = localStorage.getItem(key);
-  const n = v ? Number(v) : 0;
-  return Number.isFinite(n) ? n : 0;
-}
-function setMs(key: string, ms: number) {
-  if (typeof window !== "undefined") localStorage.setItem(key, String(ms));
-}
-function markChanged() { setMs("wt-last-change-at", nowMs()); }
-function markBackedUp() { setMs("wt-last-backup-at", nowMs()); }
-function shouldNudgeToBackup(): boolean {
-  const lastChange = getMs("wt-last-change-at");
-  const lastBackup = getMs("wt-last-backup-at");
-  const snoozeUntil = getMs("wt-nudge-snooze-until");
-  const _now = nowMs();
-  if (_now < snoozeUntil) return false;
-  if (lastChange <= lastBackup) return false;
-  if (_now - lastBackup < WEEK_MS) return false;
-  return true;
-}
-function snoozeNudge(ms = SNOOZE_MS) { setMs("wt-nudge-snooze-until", nowMs() + ms); }
+type SettingsItem = {
+  id: string;
+  name: string;
+  /** "check" or "count" */
+  inputMode?: "check" | "count";
+  /** セット数（チェック式の時の最大セット数） */
+  checkCount?: number;
+  /** セット数（count でも使う） */
+  sets?: number;
+  /** count入力のときのノルマ回数（プレースホルダー） */
+  repTarget?: number;
+  /** 表示順（小さいほど上） */
+  order?: number;
+  /** 所属カテゴリ */
+  category: "upper" | "lower" | "other";
+  /** 無効化フラグ */
+  enabled?: boolean;
+};
 
-/* ====== 全量バックアップ（設定＋記録 すべて） ====== */
-function downloadBackup(withTimestamp = true) {
-  if (typeof window === "undefined") return;
-  const dump: Record<string, unknown> = {};
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i)!;
-    const raw = localStorage.getItem(k);
-    try { dump[k] = raw ? JSON.parse(raw) : raw; } catch { dump[k] = raw; }
+type Settings = {
+  items?: SettingsItem[];
+};
+
+type Category = "upper" | "lower" | "other";
+type InputMode = "check" | "count";
+
+type MetaMap = Record<
+  string,
+  {
+    mode: InputMode;
+    setCount: number;
+    repTarget?: number;
   }
-  const pad = (n: number, l = 2) => String(n).padStart(l, "0");
-  const now = new Date();
-  const ts = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
-  const filename = withTimestamp ? `workout-backup-${ts}.json` : "workout-backup.json";
-  const blob = new Blob([JSON.stringify(dump, null, 2)], { type: "application/json" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(a.href);
-  try { markBackedUp(); } catch {}
-}
+>;
 
-export default function SettingsTab() {
-  const [items, setItems] = useState<ExtendedExerciseItem[]>([]);
-  const [ready, setReady] = useState(false);
-  const [status, setStatus] = useState("");
+const todayStr = new Date().toISOString().split("T")[0];
+const fmtDateJP = (iso: string) => {
+  const [y, m, d] = iso.split("-").map(Number);
+  return `${y}年${m}月${d}日`;
+};
 
-  // 起動時：既存設定ロード（settings-v1）→ なければデフォルト
-  useEffect(() => {
-    const saved = loadJSON<Settings>(SETTINGS_KEY);
-    const base = saved?.items?.length
-      ? (saved.items as ExtendedExerciseItem[])
-      : (defaultExercises as ExtendedExerciseItem[]);
-    setItems(normalizeOrders(base));
-    setReady(true);
-  }, []);
+const hoursSince = (iso?: string): number | null => {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return null;
+  return Math.max(0, Math.floor((Date.now() - t) / 3600000));
+};
 
-  // 変更をlocalStorageへ保存
-  useEffect(() => {
-    if (!ready) return;
-    saveJSON(SETTINGS_KEY, { items });
-    markChanged();
-  }, [items, ready]);
+const catLabel = (c: string) =>
+  c === "upper" ? "上半身トレ" : c === "lower" ? "下半身トレ" : "その他";
 
-  const [showNudge, setShowNudge] = useState(false);
-  useEffect(() => { setShowNudge(shouldNudgeToBackup()); }, [items]);
+const COUNT_MAX = 99;
 
-  const byCat = useMemo(() => ({
-    upper: items.filter((x) => x.category === "upper").sort(cmpOrderName),
-    lower: items.filter((x) => x.category === "lower").sort(cmpOrderName),
-    other: items.filter((x) => x.category === "other").sort(cmpOrderName),
-  }), [items]);
+/* 最終実施保持（ローカルストレージキー） */
+type LastDoneMap = Record<string, string | undefined>;
+type LastPrevMap = Record<string, string | undefined>;
+const KEY_V1 = "lastDone-v1";
+const KEY_V0 = "lastDone-v0"; // 互換キー
+const KEY_PREV = "lastDone-prev";
+const KEY_ALT = "lastDone";
 
-  const update = (id: string, patch: Partial<ExtendedExerciseItem>) =>
-    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
-
-  const add = (cat: Category) =>
-    setItems((prev) => {
-      const maxOrder = prev.filter((x) => x.category === cat)
-        .reduce((m, x) => Math.max(m, x.order ?? 0), 0) || 0;
-      const item = newItem(cat);
-      item.order = maxOrder + 1;
-      return [...prev, item];
-    });
-
-  const remove = (id: string) =>
-    setItems((prev) => normalizeOrders(prev.filter((x) => x.id !== id)));
-
-  const move = (id: string, dir: -1 | 1) =>
-    setItems((prev) => {
-      const arr = [...prev];
-      const idx = arr.findIndex((x) => x.id === id);
-      if (idx < 0) return prev;
-      const cat = arr[idx].category;
-      const catList = arr.filter((x) => x.category === cat).sort(cmpOrderName);
-      const pos = catList.findIndex((x) => x.id === id);
-      const nextPos = pos + dir;
-      if (nextPos < 0 || nextPos >= catList.length) return prev;
-      const moved = catList.splice(pos, 1)[0];
-      catList.splice(nextPos, 0, moved);
-      catList.forEach((x, i) => {
-        const k = arr.findIndex((y) => y.id === x.id);
-        if (k >= 0) arr[k] = { ...arr[k], order: i + 1 };
-      });
-      return arr;
-    });
-
-  const manualSave = () => {
-    const normalized = normalizeOrders(items);
-    saveJSON(SETTINGS_KEY, { items: normalized });
-    markChanged();
-    setStatus("保存しました");
-    setTimeout(() => setStatus(""), 1500);
-  };
-
-  /* ===== 全量バックアップの復元（ファイル→localStorage 全上書き） ===== */
-  const fileRef = useRef<HTMLInputElement | null>(null);
-  const importAll = async (file: File) => {
-    try {
-      const text = await file.text();
-      const data = JSON.parse(text) as Record<string, unknown>;
-      if (!window.confirm("バックアップから復元します。現在のデータは上書きされます。よろしいですか？")) return;
-      window.localStorage.clear();
-      for (const [k, v] of Object.entries(data)) {
-        const val = typeof v === "string" ? v : JSON.stringify(v);
-        window.localStorage.setItem(k, val);
-      }
-      markBackedUp();
-      alert("復元が完了しました。画面を再読み込みします。");
-      window.location.reload();
-    } catch (e) {
-      alert("バックアップの復元に失敗しました。");
-      console.error(e);
-    }
-  };
-
-  const Block = (cat: Category, title: string) => {
-    const list = byCat[cat];
-    return (
-      <section className="space-y-3 rounded-xl border p-4">
-        <div className="flex items-center justify-between">
-          <h3 className="font-semibold">{title}</h3>
-          <Button onClick={() => add(cat)}>＋ 追加</Button>
-        </div>
-
-        <div className="space-y-3">
-          {list.length === 0 && <p className="text-sm opacity-70">（種目なし）</p>}
-
-          {list.map((it, idxInCat) => (
-            <div
-              key={it.id}
-              className="grid grid-cols-1 gap-3 sm:grid-cols-12 sm:items-center rounded-md border p-3"
-            >
-              {/* 記録対象 */}
-              <label className="flex items-center gap-2 sm:col-span-2">
-                <Checkbox
-                  checked={it.enabled !== false}
-                  onCheckedChange={(v) => update(it.id, { enabled: Boolean(v) })}
-                />
-                <span className="text-sm">記録対象</span>
-              </label>
-
-              {/* 種目名 */}
-              <div className="sm:col-span-4">
-                <Input
-                  placeholder="種目名（例：フル懸垂 5回×3セット）"
-                  value={it.name}
-                  onChange={(e) => update(it.id, { name: e.target.value })}
-                />
-              </div>
-
-              {/* 入力方式 */}
-              <div className="sm:col-span-3">
-                <Select
-                  value={it.inputMode ?? "check"}
-                  onValueChange={(v) => update(it.id, { inputMode: v as InputMode })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="入力方式" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="check">チェック（セットごと）</SelectItem>
-                    <SelectItem value="count">回数入力</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* セット数（1〜5） */}
-              <div className="flex items-center gap-2 sm:col-span-2">
-                <span className="text-sm opacity-80">セット数</span>
-                <select
-                  className="h-10 rounded-md border px-2 text-sm"
-                  value={it.checkCount ?? it.sets ?? 3}
-                  onChange={(e) =>
-                    update(it.id, { checkCount: Number(e.target.value), sets: Number(e.target.value) })
-                  }
-                >
-                  {[1, 2, 3, 4, 5].map((n) => (
-                    <option key={n} value={n}>{n}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* ノルマ回数（回数入力のみ） */}
-              {(it.inputMode ?? "check") === "count" && (
-                <div className="flex items-center gap-2 sm:col-span-1">
-                  <span className="text-sm opacity-80">ノルマ回数</span>
-                  <select
-                    className="h-10 rounded-md border px-2 text-sm w-24"
-                    value={it.repTarget ?? ""}
-                    onChange={(e) => update(it.id, {
-                      repTarget: e.target.value === "" ? undefined : Number(e.target.value),
-                    })}
-                  >
-                    <option value="">未設定</option>
-                    {Array.from({ length: 99 }, (_, i) => i + 1).map((n) => (
-                      <option key={n} value={n}>{n}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {/* 順序（同カテゴリ内） */}
-              <div className="flex gap-2 sm:col-span-12 sm:justify-end">
-                <span className="text-xs px-2 py-1 rounded border">順序 {it.order ?? idxInCat + 1}</span>
-                <Button onClick={() => move(it.id, -1)}>↑</Button>
-                <Button onClick={() => move(it.id, 1)}>↓</Button>
-                <Button onClick={() => remove(it.id)}>削除</Button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-    );
-  };
-
+function CalendarIcon({ size = 18 }: { size?: number }) {
   return (
-    <div className="space-y-6">
-      {/* ヘッダー */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold">設定</h2>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-slate-500">{status}</span>
-          <Button onClick={manualSave}>保存</Button>
-          <Button
-            onClick={() => {
-              const normalized = normalizeOrders(items);
-              saveJSON(SETTINGS_KEY, { items: normalized });
-              markChanged();
-              downloadBackup(true); // 全量バックアップ（JSON）
-            }}
-          >
-            端末に保存（JSON）
-          </Button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="application/json"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) importAll(f);
-              if (fileRef.current) fileRef.current.value = "";
-            }}
-          />
-          <Button onClick={() => fileRef.current?.click()}>
-            バックアップから復元
-          </Button>
-        </div>
-      </div>
-
-      {/* バックアップ促しバナー（1週間未保存かつ変更あり） */}
-      {showNudge && (
-        <Card className="border-amber-200 bg-amber-50">
-          <div className="p-3 flex flex-wrap items-center justify-between gap-2">
-            <div className="text-sm text-amber-800">
-              最近、端末へのバックアップが1週間以上行われていません。変更内容を失わないよう、端末に保存をおすすめします。
-            </div>
-            <div className="flex gap-2">
-              <Button
-                onClick={() => {
-                  const normalized = normalizeOrders(items);
-                  saveJSON(SETTINGS_KEY, { items: normalized });
-                  markChanged();
-                  downloadBackup(true);
-                }}
-              >
-                端末に保存（JSON）
-              </Button>
-              <Button onClick={() => { snoozeNudge(); }}>
-                後で
-              </Button>
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {Block("upper", "上半身")}
-      {Block("lower", "下半身")}
-      {Block("other", "その他")}
-
-      {/* （任意）下部にも全量バックアップUIを残す */}
-      <section className="space-y-3 rounded-xl border p-4">
-        <h3 className="font-semibold">バックアップ（エクスポート / インポート）</h3>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            onClick={() => {
-              const normalized = normalizeOrders(items);
-              saveJSON(SETTINGS_KEY, { items: normalized });
-              markChanged();
-              downloadBackup(true);
-            }}
-          >
-            端末に保存（JSON）
-          </Button>
-
-          <Button onClick={() => fileRef.current?.click()}>
-            バックアップから復元
-          </Button>
-        </div>
-        <p className="text-xs text-slate-500">
-          ※ iPhone/Safariの仕様上、ユーザー操作なしの自動ファイル保存はできません。
-          必要に応じて「端末に保存（JSON）」でバックアップを取得し、「バックアップから復元」で戻してください。
-        </p>
-      </section>
-    </div>
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      className="text-slate-600"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="4" width="18" height="17" rx="2" />
+      <path d="M8 2v4M16 2v4M3 10h18" />
+    </svg>
   );
 }
 
-/* ===== ヘルパー ===== */
-const cmpOrderName = (a: ExtendedExerciseItem, b: ExtendedExerciseItem) =>
-  (a.order ?? 0) - (b.order ?? 0) || (a.name ?? "").localeCompare(b.name ?? "");
+export default function RecordTab() {
+  /* 設定→メタ */
+  const [meta, setMeta] = useState<MetaMap>({});
+  useEffect(() => {
+    const settings = loadJSON<Settings>("settings-v1");
+    const items = settings?.items?.filter((x) => x.enabled !== false) ?? [];
 
-function normalizeOrders(list: ExtendedExerciseItem[]): ExtendedExerciseItem[] {
-  const out = list.map((x) => ({ ...x }));
-  (["upper", "lower", "other"] as Category[]).forEach((cat) => {
-    const grp = out.filter((x) => x.category === cat).sort(cmpOrderName);
-    grp.forEach((x, i) => {
-      const idx = out.findIndex((y) => y.id === x.id);
-      if (idx >= 0) out[idx] = { ...out[idx], order: i + 1 };
-    });
+    const m: MetaMap = {};
+    for (const it of items) {
+      const mode: InputMode = it.inputMode ?? "check";
+      const setCount = Math.max(1, it.checkCount ?? it.sets ?? 3);
+      m[it.id] = { mode, setCount, repTarget: it.repTarget };
+    }
+    setMeta(m);
+  }, []);
+
+  /* カテゴリ別配列 */
+  const [exercises, setExercises] = useState<ExercisesState | null>(null);
+  useEffect(() => {
+    if (Object.keys(meta).length === 0) return;
+    const settings = loadJSON<Settings>("settings-v1");
+    const items = settings?.items?.filter((x) => x.enabled !== false) ?? [];
+    const grouped: ExercisesState = { upper: [], lower: [], other: [] } as any;
+
+    const sorted = [...items].sort(
+      (a, b) => (a.order ?? 0) - (b.order ?? 0)
+    );
+    for (const it of sorted) {
+      grouped[it.category].push({
+        id: it.id,
+        name: it.name,
+        sets: meta[it.id]?.setCount ?? it.sets ?? 3,
+      });
+    }
+    setExercises(grouped);
+  }, [meta]);
+
+  /* 当日レコード */
+  const [dayRecord, setDayRecord] = useState<DayRecord>({
+    date: todayStr,
+    notesUpper: "",
+    notesLower: "",
+    notesOther: "",
+    sets: {},
+    counts: {},
+    times: {},
   });
-  return out;
-}
-function newItem(cat: Category): ExtendedExerciseItem {
-  return {
-    id: crypto.randomUUID(),
-    name: "",
-    category: cat,
-    inputMode: "check",
-    enabled: true,
-    checkCount: 3,
-    sets: 3,
-    order: 0,
+
+  useEffect(() => {
+    const loaded = loadDayRecord(todayStr) as Partial<DayRecord> | null;
+    if (loaded) {
+      setDayRecord({
+        date: todayStr,
+        notesUpper: loaded.notesUpper ?? "",
+        notesLower: loaded.notesLower ?? "",
+        notesOther: loaded.notesOther ?? "",
+        sets: loaded.sets ?? {},
+        counts: loaded.counts ?? {},
+        times: loaded.times ?? {}, // 追加フィールドは後方互換
+      });
+    }
+  }, []);
+
+  const persist = (rec: DayRecord) => {
+    setDayRecord(rec);
+    (saveDayRecord as any)(todayStr, rec);
   };
+
+  /* 最終実施（インターバル表示用） */
+  const [lastDone, setLastDone] = useState<LastDoneMap>({});
+  const [lastPrev, setLastPrev] = useState<LastPrevMap>({});
+  useEffect(() => {
+    const v1 = loadJSON<LastDoneMap>(KEY_V1);
+    const v0 = loadJSON<LastDoneMap>(KEY_V0);
+    const alt = loadJSON<LastDoneMap>(KEY_ALT);
+    setLastDone(v1 ?? v0 ?? alt ?? {});
+    setLastPrev(loadJSON<LastPrevMap>(KEY_PREV) ?? {});
+  }, []);
+
+  const writeLastAll = (map: LastDoneMap, prev: LastPrevMap) => {
+    try {
+      window.localStorage.setItem(KEY_V1, JSON.stringify(map));
+      window.localStorage.setItem(KEY_V0, JSON.stringify(map)); // 互換
+      window.localStorage.setItem(KEY_PREV, JSON.stringify(prev));
+    } catch {}
+  };
+
+  /** 当日の times[*] から「その種目の最新実施時刻（最大）」を計算し、last-done を同期 */
+  const recomputeAndSyncLastDone = (exerciseId: string, record: DayRecord) => {
+    const arr = record.times?.[exerciseId] ?? [];
+    // 有効なISOのみ→数値（エポック）で最大を算出
+    let latestTs = 0;
+    for (const t of arr) {
+      if (!t) continue;
+      const ts = Date.parse(t as string);
+      if (!Number.isNaN(ts)) latestTs = Math.max(latestTs, ts);
+    }
+    const latest = latestTs ? new Date(latestTs).toISOString() : undefined;
+
+    setLastDone((cur) => {
+      if (latest) {
+        if (cur[exerciseId] !== latest) {
+          // 上書き前を prev に退避
+          setLastPrev((pp) => {
+            const nextPrev = { ...pp, [exerciseId]: cur[exerciseId] };
+            const next = { ...cur, [exerciseId]: latest };
+            writeLastAll(next, nextPrev);
+            return nextPrev;
+          });
+          return { ...cur, [exerciseId]: latest };
+        }
+        return cur; // 変更なし
+      } else {
+        if (cur[exerciseId]) {
+          const next = { ...cur };
+          delete next[exerciseId];
+          writeLastAll(next, lastPrev);
+          return next;
+        }
+        return cur;
+      }
+    });
+  };
+
+  /* チェック切り替え */
+  const toggleSet = (exerciseId: string, setIndex: number, on?: boolean) => {
+    const sets = { ...(dayRecord.sets || {}) };
+    const arr = [...(sets[exerciseId] ?? [])];
+    const nowOn = on ?? !arr[setIndex];
+
+    // 足りない分は false で埋める
+    const needLen = Math.max(setIndex + 1, arr.length);
+    for (let i = 0; i < needLen; i++) if (arr[i] == null) arr[i] = false;
+
+    arr[setIndex] = nowOn;
+    sets[exerciseId] = arr;
+
+    // times を更新
+    const times = { ...(dayRecord.times || {}) };
+    const tArr = [...(times[exerciseId] ?? [])];
+    if (nowOn) {
+      tArr[setIndex] = new Date().toISOString();
+    } else {
+      tArr[setIndex] = null; // 取消
+    }
+    times[exerciseId] = tArr;
+
+    const next: DayRecord = { ...dayRecord, sets, times };
+    persist(next);
+    // 最新実施時刻を再計算して反映
+    recomputeAndSyncLastDone(exerciseId, next);
+  };
+
+  /* 回数選択（0～99のセレクト） */
+  const changeCount = (exerciseId: string, setIndex: number, value: string) => {
+    let n = Math.floor(Number(value || "0"));
+    if (!Number.isFinite(n) || n < 0) n = 0;
+
+    const counts = { ...(dayRecord.counts || {}) };
+    const cArr = [...(counts[exerciseId] ?? [])];
+    // 足りない分は0で埋める
+    const needLen = Math.max(setIndex + 1, cArr.length);
+    for (let i = 0; i < needLen; i++) if (cArr[i] == null) cArr[i] = 0;
+    cArr[setIndex] = n;
+    counts[exerciseId] = cArr;
+
+    // times を更新（回数>0 なら記録、0なら取消）
+    const times = { ...(dayRecord.times || {}) };
+    const tArr = [...(times[exerciseId] ?? [])];
+    if (n > 0) {
+      tArr[setIndex] = new Date().toISOString();
+    } else {
+      tArr[setIndex] = null;
+    }
+    times[exerciseId] = tArr;
+
+    const next: DayRecord = { ...dayRecord, counts, times };
+    persist(next);
+    recomputeAndSyncLastDone(exerciseId, next);
+  };
+
+  /* ノート */
+  const handleCatNotesChange = (cat: Category, value: string) => {
+    if (cat === "upper") return persist({ ...dayRecord, notesUpper: value ?? "" });
+    if (cat === "lower") return persist({ ...dayRecord, notesLower: value ?? "" });
+    return persist({ ...dayRecord, notesOther: value ?? "" });
+  };
+
+  /* ラベル */
+  const recoveryText = (exerciseId: string) => {
+    const h = hoursSince(lastDone[exerciseId]);
+    if (h == null) return "—";
+    if (h < 1) return "<1H";
+    return `${h}H`;
+  };
+
+  if (!exercises) {
+    return <div>種目データがありません。（設定タブで種目を追加してください）</div>;
+  }
+
+  /* 見出し行：タイトル左、日付右 */
+  const Header = () => (
+    <div className="flex items-center gap-3 mb-4">
+      <img
+        src="/icons/icon-192x192.png"
+        alt="icon"
+        className="w-10 h-10 rounded-md"
+      />
+      <h1 className="text-lg font-bold">筋トレ記録</h1>
+      <div className="ml-auto flex items-center gap-1 text-slate-600">
+        <CalendarIcon />
+        <span className="text-sm">{fmtDateJP(todayStr)}</span>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-5">
+      <Header />
+
+      {Object.entries(exercises).map(([category, categoryExercises]) => {
+        const cat = category as Category;
+        const notesValue =
+          cat === "upper"
+            ? dayRecord.notesUpper ?? ""
+            : cat === "lower"
+            ? dayRecord.notesLower ?? ""
+            : dayRecord.notesOther ?? "";
+
+        return (
+          <Card key={category} className="p-4">
+            <h2 className="text-base font-bold mb-3">{catLabel(category)}</h2>
+
+            {categoryExercises.map((ex) => {
+              const m = meta[ex.id];
+              const mode = m?.mode ?? "check";
+              const setCount = m?.setCount ?? ex.sets ?? 3;
+              const repTarget = m?.repTarget;
+
+              return (
+                <div key={ex.id} className="border-b last:border-b-0 py-3">
+                  {/* 1行目：種目名 + インターバル */}
+                  <div className="flex items-center gap-3">
+                    <div className="text-[15px] sm:text-base font-medium">
+                      {ex.name}
+                    </div>
+                    <div className="ml-auto w-full sm:w-auto text-sm text-slate-500 text-right">
+                      前回からのインターバル：{recoveryText(ex.id)}
+                    </div>
+                  </div>
+
+                  {/* 2行目：右寄せ 3列グリッド（幅は style で確実に適用） */}
+                  <div className="mt-2 ml-auto" style={{ width: GRID_WIDTH_PX }}>
+                    {mode === "count" ? (
+                      <div className="grid grid-cols-3 gap-2">
+                        {Array.from({ length: setCount }).map((_, idx) => {
+                          const cur = dayRecord.counts?.[ex.id]?.[idx] ?? 0;
+                          return (
+                            <Select
+                              key={idx}
+                              value={String(cur)}
+                              onValueChange={(v) => changeCount(ex.id, idx, v)}
+                            >
+                              <SelectTrigger
+                                className="h-[52px] w-[52px] text-base justify-center"
+                                style={{ width: CELL, height: CELL }}
+                              >
+                                <SelectValue
+                                  placeholder={
+                                    repTarget != null ? String(repTarget) : undefined
+                                  }
+                                />
+                              </SelectTrigger>
+                              <SelectContent className="max-h-64">
+                                {Array.from({ length: COUNT_MAX + 1 }, (_, n) => (
+                                  <SelectItem key={n} value={String(n)}>
+                                    {n}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-3 gap-2">
+                        {Array.from({ length: setCount }).map((_, idx) => {
+                          const on = !!dayRecord.sets?.[ex.id]?.[idx];
+                          return (
+                            <button
+                              key={idx}
+                              onClick={() => toggleSet(ex.id, idx)}
+                              className="inline-flex items-center justify-center rounded-md border border-slate-300"
+                              style={{ width: CELL, height: CELL }}
+                            >
+                              <Checkbox
+                                checked={on}
+                                onCheckedChange={(v) =>
+                                  toggleSet(ex.id, idx, !!v)
+                                }
+                                className="w-[26px] h-[26px]" // 視認性を上げるため大きめ
+                              />
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* メモ（カテゴリごと） */}
+            <div className="mt-3">
+              <label className="block text-sm text-slate-600 mb-1">
+                {cat === "upper" ? "上半身メモ" : cat === "lower" ? "下半身メモ" : "その他メモ"}
+              </label>
+              <Textarea
+                className="text-sm"
+                value={notesValue}
+                onChange={(e) => handleCatNotesChange(cat, e.target.value)}
+                placeholder={MEMO_EXAMPLE}
+              />
+            </div>
+          </Card>
+        );
+      })}
+    </div>
+  );
 }
