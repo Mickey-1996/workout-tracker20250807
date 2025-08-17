@@ -52,7 +52,7 @@ function downloadJSON(filename: string, data: unknown) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = filename;
+  a.download = filename; // 例: "workoutrecord.2508172230"
   a.click();
   URL.revokeObjectURL(a.href);
 }
@@ -164,10 +164,9 @@ export default function RecordTab() {
     [today]
   );
 
-  /* ▼▼ ここから“SSR安全”な初期化：初期描画は空 → マウント後にlocalStorageを読む ▼▼ */
+  /* ▼▼ SSR安全な初期化 ▼▼ */
   const [exercises, setExercises] = useState<ExercisesGrouped>({ upper: [], lower: [], etc: [] });
 
-  // 記録は空で開始。マウント後に置き換える
   const [rec, setRec] = useState<DayRecord>({
     date: todayStr,
     times: {},
@@ -183,7 +182,6 @@ export default function RecordTab() {
   const [lastSavedSig, setLastSavedSig] = useState<string>("");
   const [currentSig, setCurrentSig] = useState<string>("");
 
-  // マウント後に localStorage を読み込む（SSRでは実行されない）
   useEffect(() => {
     try {
       setExercises(loadExercises());
@@ -281,7 +279,7 @@ export default function RecordTab() {
             const mode = (it.mode ?? it.inputMode ?? "check") as InputMode;
             const setCount = it.sets ?? it.checkCount ?? 3;
 
-            // 1行目：種目名 + 入力UI（折返しなし）
+            // 1行目：種目名 + 入力UI
             const row1 = (
               <div className="flex items-center gap-3 whitespace-nowrap overflow-x-auto">
                 <div className="text-sm text-slate-700 min-w-[6rem]">{it.name}</div>
@@ -337,7 +335,7 @@ export default function RecordTab() {
               </div>
             );
 
-            // 2行目：インターバル（折返しなし）
+            // 2行目：インターバル
             const times = rec.times?.[id] ?? [];
             const n = times.length;
             const last = n ? new Date(times[n - 1]) : null;
@@ -361,7 +359,7 @@ export default function RecordTab() {
           })}
         </div>
 
-        {/* カテゴリメモ */}
+        {/* カテゴリメモ（placeholderは指定しない＝空欄） */}
         <div className="mt-4">
           <div className="mb-1 text-xs text-slate-500">メモ（{label}）</div>
           <Textarea
@@ -376,59 +374,64 @@ export default function RecordTab() {
               };
               persist(next);
             }}
-            placeholder="今日の気づき・注意点など"
           />
         </div>
       </Card>
     );
   };
 
+  // YYMMDDTT（TT=時分：HHmm）形式のファイル名を生成
+  const buildYYMMDDTT = () => {
+    const now = new Date();
+    const YY = String(now.getFullYear()).slice(-2);
+    const MM = String(now.getMonth() + 1).padStart(2, "0");
+    const DD = String(now.getDate()).padStart(2, "0");
+    const TT = `${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}`;
+    return `${YY}${MM}${DD}${TT}`;
+  };
+
   return (
     <div className="p-4 sm:p-6">
-      {/* ヘッダー：左＝日付、右＝保存ボタン＋リマインド */}
+      {/* ヘッダー：上＝保存ボタン（右寄せ）、下＝日付表示 */}
+      <div className="mb-1 flex items-center justify-end">
+        {/* 変更ありバッジ */}
+        {hasUnsavedChanges && <span className="mr-3 text-xs text-rose-600">未保存の変更があります</span>}
+        <button
+          type="button"
+          className="rounded-md border px-3 py-1 text-sm hover:bg-slate-50"
+          onClick={() => {
+            const filename = `workoutrecord.${buildYYMMDDTT()}`; // 要件②：workoutrecord.YYMMDDTT
+            const payload = collectAllDayRecords();
+            downloadJSON(filename, payload); // iPhone の「ダウンロード」に保存されます
+
+            const sig = calcRecordsSignature();
+            const t = Date.now();
+            localStorage.setItem("wt:lastDiskSaveAt", String(t));
+            localStorage.setItem("wt:lastSavedSig", sig);
+            setLastDiskSaveAt(t);
+            setLastSavedSig(sig);
+            setCurrentSig(sig);
+          }}
+          aria-label="記録データを端末に保存"
+        >
+          保存
+        </button>
+      </div>
+
+      {/* 日付とリマインド行 */}
       <div className="mb-4 flex items-center justify-between">
         <div className="text-slate-700">{displayDate}</div>
-        <div className="flex items-center gap-3">
-          {/* 10日未保存のリマインド（小さめ） */}
-          {shouldPromptSave && (
-            <div className="text-xs text-amber-600">
-              しばらく（10日以上）ディスクに保存していません
-              {lastDiskSaveAt ? (
-                <span className="ml-1 text-slate-500">（最終保存 {new Date(lastDiskSaveAt).toLocaleString()}）</span>
-              ) : (
-                <span className="ml-1 text-slate-500">（まだ未保存）</span>
-              )}
-            </div>
-          )}
-          {/* 変更ありバッジ */}
-          {hasUnsavedChanges && <span className="text-xs text-rose-600">未保存の変更があります</span>}
-          <button
-            type="button"
-            className="rounded-md border px-3 py-1 text-sm hover:bg-slate-50"
-            onClick={() => {
-              const now = new Date();
-              const ts =
-                `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}` +
-                `${String(now.getDate()).padStart(2, "0")}-${String(now.getHours()).padStart(2, "0")}` +
-                `${String(now.getMinutes()).padStart(2, "0")}`;
-              const filename = `workout-records-${ts}.json`;
-
-              const payload = collectAllDayRecords();
-              downloadJSON(filename, payload); // iPhone の「ダウンロード」に保存されます
-
-              const sig = calcRecordsSignature();
-              const t = Date.now();
-              localStorage.setItem("wt:lastDiskSaveAt", String(t));
-              localStorage.setItem("wt:lastSavedSig", sig);
-              setLastDiskSaveAt(t);
-              setLastSavedSig(sig);
-              setCurrentSig(sig);
-            }}
-            aria-label="記録データを端末に保存"
-          >
-            保存
-          </button>
-        </div>
+        {/* 10日未保存のリマインド（小さめ） */}
+        {shouldPromptSave && (
+          <div className="text-xs text-amber-600">
+            10日以上ディスクに保存していません。右上の「保存」を押してください。
+            {lastDiskSaveAt ? (
+              <span className="ml-1 text-slate-500">（最終保存 {new Date(lastDiskSaveAt).toLocaleString()}）</span>
+            ) : (
+              <span className="ml-1 text-slate-500">（まだ未保存）</span>
+            )}
+          </div>
+        )}
       </div>
 
       {renderCategory("upper", "上半身")}
