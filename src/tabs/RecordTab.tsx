@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Textarea } from "@/components/ui/Textarea";
 import { Checkbox } from "@/components/ui/Checkbox";
@@ -13,11 +13,11 @@ import {
 } from "@/components/ui/Select";
 import { loadDayRecord, saveDayRecord, loadJSON } from "@/lib/local-storage";
 
-/* ========= メモ欄の記述例（全カテゴリ共通） ========= */
+/* ===== メモ欄の記述例（全カテゴリ共通） ===== */
 const MEMO_EXAMPLE = "（例）アーチャープッシュアップも10回やった";
-/* ================================================ */
+/* ======================================== */
 
-/** セルサイズ（チェック/回数とも同じサイズ） */
+/** セル基準サイズ */
 const CELL = 52; // px
 const GAP_PX = 8;
 const GRID_WIDTH_PX = 3 * CELL + 2 * GAP_PX;
@@ -99,34 +99,6 @@ function CalendarIcon({ size = 18 }: { size?: number }) {
       <rect x="3" y="4" width="18" height="17" rx="2" />
       <path d="M8 2v4M16 2v4M3 10h18" />
     </svg>
-  );
-}
-
-/* 画像フォールバック（存在するパスを順番に探す） */
-const ICON_CANDIDATES = [
-  "/icons/icon-192x192.png",
-  "/icon-192x192.png",
-  "/icons/icon-192.png",
-  "/android-chrome-192x192.png",
-  "/apple-touch-icon.png",
-  "/favicon.ico",
-];
-function HeaderIcon() {
-  const [idx, setIdx] = useState(0);
-  const src = ICON_CANDIDATES[idx] ?? "";
-  // すべて失敗したら絵文字で代替
-  if (!src) {
-    return (
-      <div className="w-10 h-10 flex items-center justify-center text-2xl">💪</div>
-    );
-  }
-  return (
-    <img
-      src={src}
-      alt="icon"
-      className="w-10 h-10 rounded-md"
-      onError={() => setIdx((i) => i + 1)}
-    />
   );
 }
 
@@ -397,36 +369,33 @@ export default function RecordTab() {
     return <div>種目データがありません。（設定タブで種目を追加してください）</div>;
   }
 
-  /* 見出し行：タイトル左、日付＋ボタン群右 */
+  /* ============ ヘッダー（アイコン＆タイトルなし、折返しなし） ============ */
   const Header = () => (
-    <div className="flex items-center gap-3 mb-4">
-      <HeaderIcon />
-      <h1 className="text-lg font-bold">筋トレ記録</h1>
-      <div className="ml-auto flex items-center gap-2 text-slate-600">
-        <CalendarIcon />
-        <span className="text-sm">{fmtDateJP(todayStr)}</span>
-        <button
-          className="ml-3 px-3 py-1 text-sm rounded bg-slate-900 text-white"
-          onClick={saveAllLocalStorageToFile}
-        >
-          保存
-        </button>
-        <button
-          className="px-3 py-1 text-sm rounded border border-slate-300"
-          onClick={onClickRestore}
-        >
-          復元
-        </button>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="application/json"
-          className="hidden"
-          onChange={onFile}
-        />
-      </div>
+    <div className="mb-4 flex items-center gap-2 whitespace-nowrap overflow-x-auto">
+      <CalendarIcon />
+      <span className="text-sm text-slate-700">{fmtDateJP(todayStr)}</span>
+      <button
+        className="ml-2 px-3 py-1 text-sm rounded bg-slate-900 text-white"
+        onClick={saveAllLocalStorageToFile}
+      >
+        保存
+      </button>
+      <button
+        className="px-3 py-1 text-sm rounded border border-slate-300"
+        onClick={onClickRestore}
+      >
+        復元
+      </button>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="application/json"
+        className="hidden"
+        onChange={onFile}
+      />
     </div>
   );
+  /* ====================================================================== */
 
   return (
     <div className="space-y-5">
