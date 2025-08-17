@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { Card } from "@/components/ui/Card";
 import { Textarea } from "@/components/ui/Textarea";
 import { Checkbox } from "@/components/ui/Checkbox";
@@ -182,6 +183,9 @@ export default function RecordTab() {
   const [lastSavedSig, setLastSavedSig] = useState<string>("");
   const [currentSig, setCurrentSig] = useState<string>("");
 
+  // Portal 用アンカー
+  const [bannerAnchor, setBannerAnchor] = useState<HTMLElement | null>(null);
+
   useEffect(() => {
     try {
       setExercises(loadExercises());
@@ -206,6 +210,9 @@ export default function RecordTab() {
       setLastSavedSig(localStorage.getItem("wt:lastSavedSig") ?? "");
       setCurrentSig(calcRecordsSignature());
     } catch {}
+
+    // Portal アンカー取得
+    setBannerAnchor(document.getElementById("save-reminder-anchor") as HTMLElement | null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   /* ▲▲ ここまで ▲▲ */
@@ -418,25 +425,23 @@ export default function RecordTab() {
         </button>
       </div>
 
-      {/* 日付とリマインド行 */}
+      {/* 日付行（本文内のリマインドは削除済み） */}
       <div className="mb-4 flex items-center justify-between">
         <div className="text-slate-700">{displayDate}</div>
-        {/* 10日未保存のリマインド（小さめ） */}
-        {shouldPromptSave && (
-          <div className="text-xs text-amber-600">
-            10日以上ディスクに保存していません。右上の「保存」を押してください。
-            {lastDiskSaveAt ? (
-              <span className="ml-1 text-slate-500">（最終保存 {new Date(lastDiskSaveAt).toLocaleString()}）</span>
-            ) : (
-              <span className="ml-1 text-slate-500">（まだ未保存）</span>
-            )}
-          </div>
-        )}
       </div>
 
       {renderCategory("upper", "上半身")}
       {renderCategory("lower", "下半身")}
       {renderCategory("etc", "その他")}
+
+      {/* ▼ Portal：タブの上の行に細いバナーを出す（アンカーがあるとき＆リマインド要件を満たすとき） */}
+      {bannerAnchor && shouldPromptSave &&
+        createPortal(
+          <div className="w-full text-center text-[11px] sm:text-xs text-amber-700 bg-amber-50 border-b border-amber-200 py-1">
+            10日以上ディスクに保存していません。右上の「保存」を押してください。
+          </div>,
+          bannerAnchor
+        )}
     </div>
   );
 }
