@@ -227,6 +227,16 @@ export default function SummaryTab() {
   // 設定（種目名解決用）
   const ex = useMemo(() => loadExercisesFromSettings(), []);
 
+  // id→name の辞書を作成（nameOf のため）
+  const nameMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const list of [ex.upper, ex.lower, ex.etc]) {
+      for (const it of list) m.set(it.id, it.name);
+    }
+    return m;
+  }, [ex]);
+  const nameOf = (id: string) => nameMap.get(id) ?? id;
+
   // カレンダーのベース月（1日固定）
   const [base, setBase] = useState(() => {
     const d = new Date();
