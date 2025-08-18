@@ -55,7 +55,7 @@ function calcRecordsSignature(): string {
   return hashString(ordered);
 }
 
-/* 入力モードの安全判定（型に依存せず判別可能に） */
+/* 入力モードの安全判定（型に依存せず判別） */
 function isRepsMode(m: unknown): boolean {
   const s = String(m ?? "");
   return s === "reps" || s === "rep" || s === "count" || s === "counts" || s === "number";
@@ -133,9 +133,8 @@ function loadExercises(): ExercisesGrouped {
   return grouped;
 }
 
-/* empty DayRecord (type-safe) */
+/* empty DayRecord */
 function makeEmptyDayRecord(date: string): DayRecord {
-  // DayRecord に reps プロパティが無い前提（存在すれば保持）
   return { date, notes: "", notesUpper: "", notesLower: "", sets: {} } as DayRecord;
 }
 
@@ -192,6 +191,8 @@ export default function RecordTab() {
     const sorted = [...items.filter((it: any) => !doneIds.includes(it.id)), ...items.filter((it: any) => doneIds.includes(it.id))];
 
     const memoLabel = category === "upper" ? "上半身メモ" : category === "lower" ? "下半身メモ" : "その他メモ";
+    const catStr = String(category);
+    const isOtherCat = catStr !== "upper" && catStr !== "lower";
 
     return (
       <>
@@ -226,22 +227,22 @@ export default function RecordTab() {
           })}
         </div>
 
-        {/* カテゴリ別メモ（元の文言に復帰） */}
+        {/* カテゴリ別メモ（元の文言そのまま） */}
         <div className="mt-6">
           <div className="text-sm text-slate-600 mb-1">{memoLabel}</div>
           <Textarea
             value={
-              category === "upper" ? (rec as any).notesUpper ?? ""
-              : category === "lower" ? (rec as any).notesLower ?? ""
+              catStr === "upper" ? (rec as any).notesUpper ?? ""
+              : catStr === "lower" ? (rec as any).notesLower ?? ""
               : (rec as any).notesEtc ?? (rec as any).notesOther ?? ""
             }
             onChange={(e) => {
               const v = e.target.value;
               const next: any = {
                 ...rec,
-                notesUpper: category === "upper" ? v : (rec as any).notesUpper ?? "",
-                notesLower: category === "lower" ? v : (rec as any).notesLower ?? "",
-                ...(category === "other" || category === "etc" ? { notesOther: v } : {}),
+                notesUpper: catStr === "upper" ? v : (rec as any).notesUpper ?? "",
+                notesLower: catStr === "lower" ? v : (rec as any).notesLower ?? "",
+                ...(isOtherCat ? { notesOther: v } : {}),
               };
               persist(next);
             }}
@@ -263,14 +264,14 @@ export default function RecordTab() {
       )}
 
       <div className="p-4 sm:p-6">
-        {/* 保存ボタン（右上） */}
+        {/* 保存ボタン（右上、タイトルと日付の間の行の右側） */}
         <div className="mb-1 flex items-center justify-end">
           {hasUnsavedChanges && <span className="mr-3 text-xs text-rose-600">未保存の変更があります</span>}
           <button
             type="button"
             className="rounded-md border px-3 py-1 text-sm hover:bg-slate-50"
             onClick={() => {
-              const filename = `record-latest.json`; // 方式B 固定名
+              const filename = `record.latest.json`; // ★ 固定名（案2：毎回上書き）
               const payload = collectAllDayRecords();
               downloadJSON(filename, payload);
               const sig = calcRecordsSignature(); const t = Date.now();
