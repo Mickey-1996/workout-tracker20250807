@@ -251,29 +251,29 @@ export default function SummaryTab() {
 
   return (
     <div className="space-y-6">
+      {/* 復元ボタン（ページ上部・カレンダーエリアの外） */}
+      <div className="flex justify-end">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/json"
+          className="hidden"
+          onChange={handleRestoreFile}
+        />
+        <button
+          type="button"
+          className="rounded-md border px-3 py-1 text-sm hover:bg-slate-50"
+          onClick={handleClickRestore}
+        >
+          復元
+        </button>
+      </div>
+
       {/* カレンダー */}
       <Card className="p-4">
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-base font-semibold">カレンダー</h2>
           <div className="text-sm text-slate-500">{ymdLocal(today)}（今日）</div>
-        </div>
-
-        {/* 復元ボタン（右寄せ・1行） */}
-        <div className="mb-2 flex justify-end">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="application/json"
-            className="hidden"
-            onChange={handleRestoreFile}
-          />
-          <button
-            type="button"
-            className="rounded-md border px-3 py-1 text-sm hover:bg-slate-50"
-            onClick={handleClickRestore}
-          >
-            復元
-          </button>
         </div>
 
         <DayPicker
@@ -411,7 +411,7 @@ export default function SummaryTab() {
       <Card className="p-4">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-base font-semibold">週合計（種目別）</h2>
-        <div className="text-sm text-slate-500">{weekAggByItem.rangeLabel}</div>
+          <div className="text-sm text-slate-500">{weekAggByItem.rangeLabel}</div>
         </div>
 
         {weekAggByItem.rows.length === 0 ? (
