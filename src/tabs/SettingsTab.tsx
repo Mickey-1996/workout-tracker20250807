@@ -34,22 +34,31 @@ type Settings = { items: ExtendedExerciseItem[] };
 const cmpOrderName = (a: ExtendedExerciseItem, b: ExtendedExerciseItem) =>
   (a.order ?? 0) - (b.order ?? 0) || (a.name ?? "").localeCompare(b.name ?? "");
 
+/** v1(upper/lower/other|etc) を内部表記 upper/lower/other に寄せる */
+type Cat3 = "upper" | "lower" | "other";
+const toCat3 = (c: any): Cat3 =>
+  c === "upper" || c === "lower" ? c : "other";
+
 function normalizeOrders(list: ExtendedExerciseItem[]): ExtendedExerciseItem[] {
-  const out = list.map((x) => ({ ...x })); // 破壊的変更を避ける
-  (["upper", "lower", "other"] as Category[]).forEach((cat) => {
-    const grp = out.filter((x) => x.category === cat).sort(cmpOrderName);
+  const out = list.map((x) => ({ ...x, category: toCat3(x.category) })); // 破壊的変更を避ける + category 正規化
+  (["upper", "lower", "other"] as Cat3[]).forEach((cat) => {
+    const grp = out.filter((x) => toCat3(x.category) === cat).sort(cmpOrderName);
     grp.forEach((x, i) => {
       const idx = out.findIndex((y) => y.id === x.id);
-      if (idx >= 0) out[idx] = { ...out[idx], order: i + 1 };
+      if (idx >= 0) out[idx] = { ...out[idx], order: i + 1, category: cat };
     });
   });
   return out;
 }
 
-function toItemSafe(raw: any, fallbackCat: Category = "other"): ExtendedExerciseItem {
-  const catRaw = raw?.category;
-  const cat = (catRaw === "upper" || catRaw === "lower" || catRaw === "other" ? catRaw : (catRaw === "etc" ? "other" : fallbackCat)) as Category;
-  const checkCount = typeof raw?.checkCount === "number" ? raw.checkCount : (typeof raw?.sets === "number" ? raw.sets : 3);
+function toItemSafe(raw: any, fallbackCat: Cat3 = "other"): ExtendedExerciseItem {
+  const cat = toCat3(raw?.category ?? fallbackCat);
+  const checkCount =
+    typeof raw?.checkCount === "number"
+      ? raw.checkCount
+      : typeof raw?.sets === "number"
+      ? raw.sets
+      : 3;
   return {
     id: String(raw?.id ?? crypto.randomUUID()),
     name: String(raw?.name ?? ""),
@@ -63,11 +72,11 @@ function toItemSafe(raw: any, fallbackCat: Category = "other"): ExtendedExercise
   };
 }
 
+/** RecordTab 互換の "exercises" 形式（upper/lower/other）を作る */
 function groupForCompat(list: ExtendedExerciseItem[]) {
-  type Cat3 = "upper" | "lower" | "other";
   const g: Record<Cat3, any[]> = { upper: [], lower: [], other: [] };
   for (const it of list) {
-    const key = (it.category === "etc" ? "other" : it.category) as Cat3;
+    const key = toCat3(it.category);
     g[key].push({
       id: it.id,
       name: it.name,
@@ -84,7 +93,7 @@ function groupForCompat(list: ExtendedExerciseItem[]) {
 }
 /* ========================================== */
 
-function newItem(cat: Category): ExtendedExerciseItem {
+function newItem(cat: Cat3): ExtendedExerciseItem {
   return {
     id: crypto.randomUUID(),
     name: "",
@@ -106,40 +115,47 @@ export default function SettingsTab() {
     // 既存データ → なければデフォルト種目
     const saved = loadJSON<Settings>(SETTINGS_KEY);
     const base =
-      saved?.items?.length ? (saved.items as ExtendedExerciseItem[]) : (defaultExercises as ExtendedExerciseItem[]);
+      saved?.items?.length
+        ? (saved.items as ExtendedExerciseItem[])
+        : (defaultExercises as ExtendedExerciseItem[]);
     setItems(normalizeOrders(base));
     setReady(true);
   }, []);
 
   useEffect(() => {
     if (!ready) return;
+    const normalized = normalizeOrders(items);
     // v1 / v2 / 互換キーに保存
-    saveJSON(SETTINGS_KEY, { items });
-    saveJSON("wt:settings.v2", { items });
-    saveJSON("exercises", groupForCompat(items));
+    saveJSON(SETTINGS_KEY, { items: normalized });
+    saveJSON("wt:settings.v2", { items: normalized });
+    saveJSON("exercises", groupForCompat(normalized));
   }, [items, ready]);
 
   const byCat = useMemo(() => {
-    return {
-      upper: items.filter((x) => x.category === "upper").sort(cmpOrderName),
-      lower: items.filter((x) => x.category === "lower").sort(cmpOrderName),
-      other: items.filter((x) => x.category === "other").sort(cmpOrderName),
-    };
+    const g: Record<Cat3, ExtendedExerciseItem[]> = { upper: [], lower: [], other: [] };
+    for (const it of items) {
+      g[toCat3(it.category)].push({ ...it, category: toCat3(it.category) });
+    }
+    (Object.keys(g) as Cat3[]).forEach((k) => g[k].sort(cmpOrderName));
+    return g;
   }, [items]);
 
   const update = (id: string, patch: Partial<ExtendedExerciseItem>) =>
     setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
 
-  const add = (cat: Category) =>
+  const add = (cat: Cat3) =>
     setItems((prev) => {
       const maxOrder =
-        prev.filter((x) => x.category === cat).reduce((m, x) => Math.max(m, x.order ?? 0), 0) || 0;
+        prev
+          .filter((x) => toCat3(x.category) === cat)
+          .reduce((m, x) => Math.max(m, x.order ?? 0), 0) || 0;
       const item = newItem(cat);
       item.order = maxOrder + 1;
       return [...prev, item];
     });
 
-  const remove = (id: string) => setItems((prev) => normalizeOrders(prev.filter((x) => x.id !== id)));
+  const remove = (id: string) =>
+    setItems((prev) => normalizeOrders(prev.filter((x) => x.id !== id)));
 
   /** ↑/↓：カテゴリ内で1つ移動し、連動して連番を振り直す */
   const move = (id: string, dir: -1 | 1) =>
@@ -147,10 +163,12 @@ export default function SettingsTab() {
       const arr = [...prev];
       const idx = arr.findIndex((x) => x.id === id);
       if (idx < 0) return prev;
-      const cat = arr[idx].category;
+      const cat = toCat3(arr[idx].category);
 
       // 対象カテゴリの並び（現在の order で整列）
-      const catList = arr.filter((x) => x.category === cat).sort(cmpOrderName);
+      const catList = arr
+        .filter((x) => toCat3(x.category) === cat)
+        .sort(cmpOrderName);
       const pos = catList.findIndex((x) => x.id === id);
       const nextPos = pos + dir;
       if (nextPos < 0 || nextPos >= catList.length) return prev;
@@ -162,7 +180,7 @@ export default function SettingsTab() {
       // 連番を再付与
       catList.forEach((x, i) => {
         const k = arr.findIndex((y) => y.id === x.id);
-        if (k >= 0) arr[k] = { ...arr[k], order: i + 1 };
+        if (k >= 0) arr[k] = { ...arr[k], order: i + 1, category: cat };
       });
 
       return arr;
@@ -209,7 +227,7 @@ export default function SettingsTab() {
         const arr = (json["settings-v1"]?.items ?? []) as any[];
         list = arr.map((x) => toItemSafe(x));
       } else if (json?.upper || json?.lower || json?.other || json?.etc) {
-        const push = (arr: any[] | undefined, cat: Category) => {
+        const push = (arr: any[] | undefined, cat: Cat3) => {
           if (!Array.isArray(arr)) return;
           for (const raw of arr) list.push(toItemSafe(raw, cat));
         };
@@ -238,7 +256,7 @@ export default function SettingsTab() {
     }
   };
 
-  const Block = (cat: Category, title: string) => {
+  const Block = (cat: Cat3, title: string) => {
     const list = byCat[cat];
     return (
       <section className="space-y-3 rounded-xl border p-4">
