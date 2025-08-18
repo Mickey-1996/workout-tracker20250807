@@ -202,12 +202,6 @@ export default function RecordTab() {
     setCurrentSig(calcRecordsSignature());
   };
 
-  /** チェックON時に時刻も記録 */
-  const markDone = (id: string) => {
-    const iso = new Date().toISOString();
-    persist({ ...rec, times: { ...(rec.times ?? {}), [id]: [...(rec.times?.[id] ?? []), iso] } });
-  };
-
   /* ===== UI ===== */
   const Banner = () =>
     shouldPromptSave ? (
@@ -290,16 +284,19 @@ export default function RecordTab() {
             const mode = (it.mode ?? it.inputMode ?? "check") as InputMode;
             const setCount = clampSets(it.sets ?? it.checkCount ?? 3);
 
+            // 表示配列（必ず setCount 個）
             const countsArr = padCounts(rec.counts?.[id], setCount);
             const checksArr = padChecks(rec.sets?.[id], setCount);
 
-            // インターバル（最後とその直前）→ 時間単位表示
+            // インターバル（最後とその直前）→ 1時間単位
             const times = rec.times?.[id] ?? [];
             const n = times.length;
             const last = n ? new Date(times[n - 1]) : null;
             const prev = n > 1 ? new Date(times[n - 2]) : null;
-            const intervalMs = last && prev ? last.getTime() - prev.getTime()
-                              : last ? Date.now() - last.getTime() : undefined;
+            const intervalMs =
+              last && prev ? last.getTime() - prev.getTime()
+              : last ? Date.now() - last.getTime()
+              : undefined;
 
             return (
               <div key={id} className="rounded-lg border border-slate-200 p-3">
@@ -311,30 +308,54 @@ export default function RecordTab() {
                   前回からのインターバル：{intervalMs !== undefined ? formatHours(intervalMs) : "—"}
                 </div>
 
-                {/* 入力UI（右寄せ・5列折返し・正方形） */}
+                {/* 入力UI（右寄せ・5列折返し・正方形56px） */}
                 <div className="mt-2 flex justify-end">
                   <div className="grid grid-cols-5 gap-2">
                     {mode === "count"
                       ? countsArr.map((val, idx) => {
                           const update = (v: number) => {
-                            const next = [...countsArr];
-                            next[idx] = v;
-                            persist({ ...rec, counts: { ...(rec.counts ?? {}), [id]: next } });
+                            setRec((prev) => {
+                              const prevCounts = padCounts(prev.counts?.[id], setCount);
+                              const nextCounts = [...prevCounts];
+                              nextCounts[idx] = v;
+                              const next: DayRecord = {
+                                ...prev,
+                                counts: { ...(prev.counts ?? {}), [id]: nextCounts },
+                              };
+                              saveDayRecord(todayStr, next);
+                              setCurrentSig(calcRecordsSignature());
+                              return next;
+                            });
                           };
-                          // 最大は 15 に制限
+                          // 最大 15
                           const max = Math.min(it.repTarget ?? 15, 15);
-                          return <SquareCount key={idx} value={val} onChange={update} max={max} />;
+                          return <SquareCount key={`${id}-count-${idx}`} value={val} onChange={update} max={max} />;
                         })
                       : checksArr.map((on, idx) => {
                           const toggle = () => {
-                            const nextChecks = [...checksArr];
-                            nextChecks[idx] = !nextChecks[idx];
-                            persist({ ...rec, sets: { ...(rec.sets ?? {}), [id]: nextChecks } });
-                            if (nextChecks[idx]) markDone(id);
+                            setRec((prev) => {
+                              const prevChecks = padChecks(prev.sets?.[id], setCount);
+                              const nowOn = !prevChecks[idx];
+                              const nextChecks = [...prevChecks];
+                              nextChecks[idx] = nowOn;
+
+                              // ON のときだけ時刻追加
+                              const prevTimes = prev.times?.[id] ?? [];
+                              const nextTimes = nowOn ? [...prevTimes, new Date().toISOString()] : prevTimes;
+
+                              const next: DayRecord = {
+                                ...prev,
+                                sets:  { ...(prev.sets  ?? {}), [id]: nextChecks },
+                                times: { ...(prev.times ?? {}), [id]: nextTimes  },
+                              };
+                              saveDayRecord(todayStr, next);
+                              setCurrentSig(calcRecordsSignature());
+                              return next;
+                            });
                           };
                           return (
                             <button
-                              key={idx}
+                              key={`${id}-check-${idx}`}
                               type="button"
                               onClick={toggle}
                               aria-pressed={on}
