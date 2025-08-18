@@ -44,6 +44,7 @@ function isRepsMode(m: unknown): boolean {
   const s = String(m ?? "");
   return s === "reps" || s === "rep" || s === "count" || s === "counts" || s === "number";
 }
+
 /* Categoryに追従するグルーピング（other/etc 両対応） */
 type ExercisesGrouped = Partial<Record<Category, any[]>>;
 
@@ -130,7 +131,7 @@ function SquareCheck({
       aria-pressed={checked}
       onClick={onToggle}
       className={[
-        "w-11 h-11 sm:w-12 sm:h-12",           // なるべくスクショのサイズ感
+        "w-11 h-11 sm:w-12 sm:h-12",
         "border rounded-md",
         checked ? "bg-slate-700 border-slate-700" : "bg-white border-slate-300",
         "transition-colors"
@@ -238,7 +239,7 @@ export default function RecordTab() {
     </>
   );
 
-  /* ---------- 内部：カテゴリ描画（1行レイアウト・5個折り返し） ---------- */
+  /* ---------- 内部：カテゴリ描画（1行レイアウト） ---------- */
   function renderCategory(category: Category, title: string) {
     const items = (exercises[category] ?? []).filter((it: any) => it.enabled !== false);
     const sorted = [...items.filter((it: any) => !doneIds.includes(it.id)), ...items.filter((it: any) => doneIds.includes(it.id))];
@@ -265,7 +266,6 @@ export default function RecordTab() {
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
                     <div className="font-medium break-words">{it.name}</div>
-                    {/* セット表記など入れる場合はここに（今回はベース画面のまま何も表示しない） */}
                   </div>
 
                   <div className="shrink-0">
@@ -273,7 +273,14 @@ export default function RecordTab() {
 
                     {/* 入力域：回数 or チェック */}
                     {isRepsMode(mode) ? (
-                      <RepInput rec={rec} id={it.id} target={repTarget} onChange={persist} markDone={markDone} />
+                      <RepSelects5PerRow
+                        rec={rec}
+                        id={it.id}
+                        setCount={setCount}
+                        target={repTarget}
+                        onChange={persist}
+                        markDone={markDone}
+                      />
                     ) : (
                       <Checks5PerRow rec={rec} id={it.id} setCount={setCount} onChange={persist} markDone={markDone} />
                     )}
@@ -312,30 +319,63 @@ export default function RecordTab() {
 }
 
 /* ---------- Inputs ---------- */
-function RepInput({
-  rec, id, target, onChange, markDone,
-}: { rec: DayRecord; id: string; target: number; onChange: (next: any) => void; markDone: (id: string) => void; }) {
-  const currentReps = (rec as any).reps ?? {};
-  const [val, setVal] = useState<number>(Number(currentReps[id] ?? 0));
-  useEffect(() => {
-    setVal(Number(((rec as any).reps ?? {})[id] ?? 0));
-  }, [rec, id]);
+/* ★ 回数入力：セレクトBOXをセット数分、5個で折り返し（見た目は四角い小箱） */
+function RepSelects5PerRow({
+  rec, id, setCount, target, onChange, markDone,
+}: { rec: DayRecord; id: string; setCount: number; target: number; onChange: (next: any) => void; markDone: (id: string) => void; }) {
+  const MAX_PER_ROW = 5;
+
+  function clamp(n: number) {
+    const c = isFinite(n) ? Math.floor(n) : 3;
+    return Math.max(1, Math.min(10, c)); // 1..10
+  }
+  const count = clamp(setCount);
+  const maxOption = Math.max(10, Math.min(50, Math.floor(target || 10))); // 目標に寄せつつ上限50
+
+  // 既存reps（number[] もしくは number）を配列に正規化
+  const raw = (rec as any).reps?.[id];
+  const curArr: number[] = Array.isArray(raw)
+    ? raw.slice(0, count)
+    : typeof raw === "number"
+      ? Array.from({ length: count }, (_, i) => (i === 0 ? raw : 0))
+      : [];
+  const reps: number[] = Array.from({ length: count }, (_, i) => Number(curArr[i] ?? 0));
+
+  const rows: number[][] = [];
+  for (let i = 0; i < count; i += MAX_PER_ROW) {
+    rows.push(Array.from({ length: Math.min(MAX_PER_ROW, count - i) }, (_, k) => i + k));
+  }
+
+  const updateAt = (idx: number, v: number) => {
+    const nextReps = [...reps];
+    nextReps[idx] = v;
+    const next: any = { ...rec, reps: { ...(rec as any).reps ?? {}, [id]: nextReps } };
+    onChange(next);
+    if (v > 0) markDone(id);
+  };
 
   return (
-    <div className="flex items-center gap-2 justify-end">
-      <input
-        className="w-24 rounded-md border px-2 py-1 text-right"
-        type="number" inputMode="numeric" min={0}
-        value={val}
-        onChange={(e) => setVal(Number(e.target.value || 0))}
-        onBlur={() => {
-          const n = Number.isFinite(val) ? Math.max(0, Math.floor(val)) : 0;
-          const next: any = { ...rec, reps: { ...(currentReps as any), [id]: n } };
-          onChange(next);
-          if (n > 0) markDone(id);
-        }}
-      />
-      <span className="text-xs text-slate-500">/ 目標 {target}</span>
+    <div className="space-y-2">
+      {rows.map((row, r) => (
+        <div key={r} className="flex items-center justify-end gap-2">
+          {row.map((idx) => (
+            <select
+              key={idx}
+              value={reps[idx]}
+              onChange={(e) => updateAt(idx, Number(e.target.value))}
+              className={[
+                "w-11 h-11 sm:w-12 sm:h-12",
+                "border rounded-md bg-white",
+                "text-center"
+              ].join(" ")}
+            >
+              {Array.from({ length: maxOption + 1 }, (_, n) => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+          ))}
+        </div>
+      ))}
     </div>
   );
 }
@@ -348,11 +388,10 @@ function Checks5PerRow({
 
   function clamp(n: number) {
     const c = isFinite(n) ? Math.floor(n) : 3;
-    return Math.max(1, Math.min(10, c)); // 上限10（従来想定）
+    return Math.max(1, Math.min(10, c));
   }
   const count = clamp(setCount);
 
-  // 既存データの長さと整合を取る
   const current = Array.isArray((rec as any).sets?.[id]) ? (rec as any).sets[id] : [];
   const checks: boolean[] = Array.from({ length: count }, (_, i) => Boolean(current[i] ?? false));
 
@@ -381,3 +420,4 @@ function Checks5PerRow({
     </div>
   );
 }
+
