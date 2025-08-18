@@ -6,7 +6,7 @@ import { Card } from "@/components/ui/Card";
 import { Textarea } from "@/components/ui/Textarea";
 import { Checkbox } from "@/components/ui/Checkbox";
 import { loadDayRecord, saveDayRecord, loadJSON } from "@/lib/local-storage";
-import type { ExerciseItem, DayRecord, Category, InputMode } from "@/lib/types";
+import type { DayRecord, Category, InputMode } from "@/lib/types";
 
 /* --- インラインSVG：Calendar アイコン（lucide-react 非依存） --- */
 function CalendarIcon({ className }: { className?: string }) {
@@ -71,11 +71,11 @@ function calcRecordsSignature(): string {
   return hashString(ordered);
 }
 
-/* --- 型（プロジェクトのtypesに無いのでローカル定義） --- */
+/* --- 型：Exercise の配列は any として扱い、後方互換プロパティも保持 --- */
 type ExercisesGrouped = {
-  upper: ExerciseItem[];
-  lower: ExerciseItem[];
-  etc: ExerciseItem[];
+  upper: any[];
+  lower: any[];
+  etc: any[];
 };
 
 /* --- 設定から種目ロード（後方互換を維持） --- */
@@ -85,20 +85,18 @@ function loadExercises(): ExercisesGrouped {
   if (v2?.items && Array.isArray(v2.items)) {
     const grouped: ExercisesGrouped = { upper: [], lower: [], etc: [] };
     for (const it of v2.items as any[]) {
-      const item: ExerciseItem = {
+      const item = {
         id: String(it.id ?? ""),
         name: String(it.name ?? ""),
         category: (it.category ?? "etc") as Category,
         enabled: Boolean(it.enabled ?? true),
-        mode: (it.mode ?? it.inputMode ?? "check") as InputMode,
-        inputMode: (it.inputMode ?? it.mode) as InputMode | undefined,
+        inputMode: (it.inputMode ?? it.mode ?? "check") as InputMode,
         sets:
           typeof it.sets === "number"
             ? it.sets
             : typeof it.checkCount === "number"
             ? it.checkCount
             : 3,
-        checkCount: it.checkCount,
         repTarget: it.repTarget,
         order: it.order,
       };
@@ -110,7 +108,9 @@ function loadExercises(): ExercisesGrouped {
       ).push(item);
     }
     for (const k of ["upper", "lower", "etc"] as const) {
-      grouped[k].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      grouped[k].sort(
+        (a: any, b: any) => (a?.order ?? 0) - (b?.order ?? 0)
+      );
     }
     return grouped;
   }
@@ -124,24 +124,24 @@ function loadExercises(): ExercisesGrouped {
         grouped[k].push({
           id: String(it.id ?? ""),
           name: String(it.name ?? ""),
-          category: k,
+          category: k as Category,
           enabled: Boolean(it.enabled ?? true),
-          mode: (it.mode ?? it.inputMode ?? "check") as InputMode,
-          inputMode: (it.inputMode ?? it.mode) as InputMode | undefined,
+          inputMode: (it.inputMode ?? it.mode ?? "check") as InputMode,
           sets:
             typeof it.sets === "number"
               ? it.sets
               : typeof it.checkCount === "number"
               ? it.checkCount
               : 3,
-          checkCount: it.checkCount,
           repTarget: it.repTarget,
           order: it.order,
         });
       }
     }
     for (const k of ["upper", "lower", "etc"] as const) {
-      grouped[k].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      grouped[k].sort(
+        (a: any, b: any) => (a?.order ?? 0) - (b?.order ?? 0)
+      );
     }
     return grouped;
   }
@@ -154,7 +154,6 @@ function loadExercises(): ExercisesGrouped {
 export default function RecordTab() {
   const today = new Date();
   const todayStr = toYmd(today);
-  const displayDate = `${today.getFullYear()}年${String(today.getMonth() + 1).padStart(2, "0")}月${String(today.getDate()).padStart(2, "0")}日`;
 
   const [exercises, setExercises] = useState<ExercisesGrouped>({ upper: [], lower: [], etc: [] });
   const [rec, setRec] = useState<DayRecord>(
@@ -220,46 +219,57 @@ export default function RecordTab() {
 
   /* --- UI レンダリング関数 --- */
   const renderCategory = (category: Category, title: string) => {
-    const items = (exercises[category] ?? []).filter((it) => it.enabled !== false);
+    const items = (exercises[category] ?? []).filter((it: any) => it.enabled !== false);
     const sorted = [
-      ...items.filter((it) => !doneIds.includes(it.id)),
-      ...items.filter((it) => doneIds.includes(it.id)),
+      ...items.filter((it: any) => !doneIds.includes(it.id)),
+      ...items.filter((it: any) => doneIds.includes(it.id)),
     ];
 
     return (
       <>
         <h2 className="mb-2 mt-6 text-lg font-semibold">{title}</h2>
         <div className="grid gap-4 sm:grid-cols-2">
-          {sorted.map((it) => (
-            <Card key={it.id} className="p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="font-medium">{it.name}</div>
-                <div className="text-xs text-slate-500">{it.mode === "reps" ? "回数入力" : "チェック"}</div>
-              </div>
+          {sorted.map((it: any) => {
+            const mode: InputMode = (it.inputMode ?? it.mode ?? "check") as InputMode;
+            const setCount: number =
+              typeof it.sets === "number" ? it.sets : typeof it.checkCount === "number" ? it.checkCount : 3;
+            const repTarget: number = typeof it.repTarget === "number" ? it.repTarget : 10;
 
-              {it.mode === "reps" ? (
-                <div className="space-y-2">
-                  <div className="text-xs text-slate-500">目標回数</div>
-                  <RepInput rec={rec} id={it.id} target={it.repTarget ?? 10} onChange={persist} markDone={markDone} />
+            return (
+              <Card key={it.id} className="p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="font-medium">{it.name}</div>
+                  <div className="text-xs text-slate-500">{mode === "reps" ? "回数入力" : "チェック"}</div>
                 </div>
-              ) : (
-                <div className="space-y-2">
-                  <div className="text-xs text-slate-500">セット数</div>
-                  <CheckInput
-                    rec={rec}
-                    id={it.id}
-                    setCount={it.sets ?? it.checkCount ?? 3}
-                    onChange={persist}
-                    markDone={markDone}
-                  />
-                </div>
-              )}
-            </Card>
-          ))}
+
+                {mode === "reps" ? (
+                  <div className="space-y-2">
+                    <div className="text-xs text-slate-500">目標回数</div>
+                    <RepInput rec={rec} id={it.id} target={repTarget} onChange={persist} markDone={markDone} />
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="text-xs text-slate-500">セット数</div>
+                    <CheckInput
+                      rec={rec}
+                      id={it.id}
+                      setCount={setCount}
+                      onChange={persist}
+                      markDone={markDone}
+                    />
+                  </div>
+                )}
+              </Card>
+            );
+          })}
         </div>
       </>
     );
   };
+
+  const displayDate = `${today.getFullYear()}年${String(today.getMonth() + 1).padStart(2, "0")}月${String(
+    today.getDate()
+  ).padStart(2, "0")}日`;
 
   return (
     <>
@@ -308,11 +318,7 @@ export default function RecordTab() {
         <div className="mb-4 flex items-center justify-start">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <CalendarIcon className="w-5 h-5 text-slate-500" />
-            <time dateTime={todayStr}>
-              {`${today.getFullYear()}年${String(today.getMonth() + 1).padStart(2, "0")}月${String(
-                today.getDate()
-              ).padStart(2, "0")}日`}
-            </time>
+            <time dateTime={todayStr}>{displayDate}</time>
           </div>
         </div>
 
@@ -411,3 +417,4 @@ function CheckInput({
     </div>
   );
 }
+
