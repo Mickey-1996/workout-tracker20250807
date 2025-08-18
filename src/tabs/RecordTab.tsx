@@ -20,7 +20,7 @@ import type {
 } from "@/lib/types";
 
 /* ================== Utils ================== */
-const EXPORT_FILENAME = "workoutrecord.latest"; // SettingsTabと同等。拡張子なしで固定
+const EXPORT_FILENAME = "workoutrecord.latest";
 
 const toYmd = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
@@ -38,7 +38,7 @@ const padCounts = (src: number[] | undefined, setCount: number) => {
 };
 const padChecks = (src: boolean[] | undefined, setCount: number) => {
   const c = clampSets(setCount);
-  const base = Array.isArray(src) ? [...src] : [];
+  const base = Array.isArray(src) ? [...src] : []; // ← [.src] の誤字を修正
   while (base.length < c) base.push(false);
   return base.slice(0, c);
 };
@@ -51,18 +51,27 @@ function hashString(s: string) {
   return (h >>> 0).toString(16);
 }
 
-/** localStorage の day:* を全取得（壊れた値も空オブジェクトで保持） */
+/** これは「日別記録」だけを集める。キー名の差異に強い実装に変更 */
+function isDayRecordObject(x: any): boolean {
+  return (
+    x &&
+    typeof x === "object" &&
+    ("times" in x || "sets" in x || "counts" in x || "notesUpper" in x)
+  );
+}
 function collectAllDayRecords(): Record<string, unknown> {
   const out: Record<string, unknown> = {};
+  const keyLike = /^(day:|wt:day:|record:|workout:|train:|\d{4}-\d{2}-\d{2}$)/i;
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
-    if (k && k.startsWith("day:")) {
-      try {
-        const v = localStorage.getItem(k);
-        out[k] = v ? JSON.parse(v) : {};
-      } catch {
-        out[k] = {};
-      }
+    if (!k) continue;
+    try {
+      const raw = localStorage.getItem(k);
+      if (!raw) continue;
+      const parsed = JSON.parse(raw);
+      if (keyLike.test(k) || isDayRecordObject(parsed)) out[k] = parsed;
+    } catch {
+      /* ignore broken entry */
     }
   }
   return out;
@@ -86,8 +95,8 @@ const hasAnyData = (r?: Partial<DayRecord>) => {
   return false;
 };
 
-/** SettingsTab と同等の保存（Blob→a[download]→失敗時 data:URL） */
-function saveAsJson_LikeSettingsTab(filename: string, data: unknown): boolean {
+/** SettingsTab方式のJSON保存（Blob→a[download]→revoke、失敗時 data:URL） */
+function saveAsJsonLikeSettings(filename: string, data: unknown): boolean {
   const text = jsonString(data);
   try {
     const blob = new Blob([text], { type: "application/json" });
@@ -114,7 +123,7 @@ function saveAsJson_LikeSettingsTab(filename: string, data: unknown): boolean {
   }
 }
 
-/* -------- 設定ロード -------- */
+/* -------- 設定ロード（SettingsTabの保存形式に対応） -------- */
 function loadExercises(): ExercisesGrouped {
   // v2形式（settingsタブの最新仕様）
   const v2 = loadJSON<any>("wt:settings.v2");
@@ -286,14 +295,14 @@ export default function RecordTab() {
           type="button"
           className="rounded-md border px-3 py-1 text-sm hover:bg-slate-50"
           onClick={() => {
-            // ① 当日分をlocalStorageへ確実に反映
+            // ①当日分を確実に localStorage へ反映
             saveSafe(todayStr, rec);
 
-            // ② 全日分を収集して SettingsTab と同じ手順で保存
+            // ②全日分を収集して保存
             const payload = collectAllDayRecords();
-            const ok = saveAsJson_LikeSettingsTab(EXPORT_FILENAME, payload);
+            const ok = saveAsJsonLikeSettings(EXPORT_FILENAME, payload);
 
-            // ③ 署名・時刻の更新（未保存警告の抑制）
+            // ③署名・時刻の更新
             const sig = calcRecordsSignature();
             const t = Date.now();
             localStorage.setItem("wt:lastDiskSaveAt", String(t));
@@ -316,7 +325,7 @@ export default function RecordTab() {
     </div>
   );
 
-  // 56px 正方形：iOSの重なり回避（min-* + shrink-0 + block/relative + leading-none）
+  // ▼ ボックスを 52px 正方形に縮小：iOSでも重ならないよう min-* + shrink-0 + block
   const SquareCount = ({
     value,
     onChange,
@@ -326,12 +335,11 @@ export default function RecordTab() {
     onChange: (n: number) => void;
     max: number;
   }) => (
-    <div className="w-14 h-14 min-w-[56px] min-h-[56px] shrink-0 relative block">
+    <div className="w-[52px] h-[52px] min-w-[52px] min-h-[52px] shrink-0 relative block">
       <Select value={String(value)} onValueChange={(v) => onChange(Number(v))}>
-        <SelectTrigger className="h-14 w-14 p-0 text-lg justify-center leading-none box-border">
+        <SelectTrigger className="h-[52px] w-[52px] p-0 text-lg justify-center leading-none box-border">
           <SelectValue placeholder="0" />
         </SelectTrigger>
-        {/* iPhoneでも必ず下に出す／高z-index／スクロール可 */}
         <SelectContent
           side="bottom"
           align="start"
@@ -350,12 +358,12 @@ export default function RecordTab() {
 
   const SquareCheck = ({ on }: { on: boolean }) => (
     <div
-      className={`w-14 h-14 min-w-[56px] min-h-[56px] shrink-0 relative block rounded-md border flex items-center justify-center ${
+      className={`w-[52px] h-[52px] min-w-[52px] min-h-[52px] shrink-0 relative block rounded-md border flex items-center justify-center ${
         on ? "bg-emerald-500 border-emerald-600 text-white" : "border-slate-300"
       }`}
     >
       {on ? (
-        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
           <path
             d="M20 6L9 17l-5-5"
             fill="none"
@@ -384,7 +392,7 @@ export default function RecordTab() {
             const countsArr = padCounts(rec.counts?.[id], setCount);
             const checksArr = padChecks(rec.sets?.[id], setCount);
 
-            // インターバル（最後と直前／なければ現在との差）
+            // インターバル
             const times = rec.times?.[id] ?? [];
             const n = times.length;
             const last = n ? new Date(times[n - 1]) : null;
@@ -409,17 +417,17 @@ export default function RecordTab() {
                   {intervalMs !== undefined ? formatHours(intervalMs) : "—"}
                 </div>
 
-                {/* 入力UI：右端寄せ・折返し時も重ならない（iPhone対策） */}
+                {/* 入力UI：右端寄せ・重なり防止 */}
                 <div className="mt-2 w-full">
                   <div
                     className="
                       ml-auto
                       grid
-                      [grid-template-columns:repeat(5,56px)]
+                      [grid-template-columns:repeat(5,52px)]
                       gap-x-2 gap-y-3
-                      auto-rows-[64px]
+                      auto-rows-[60px]
                       justify-items-end content-start
-                      w-[min(100%,336px)]
+                      w-[min(100%,320px)]
                     "
                   >
                     {mode === "count"
@@ -527,10 +535,14 @@ export default function RecordTab() {
 
   return (
     <>
-      <Banner />
+      {shouldPromptSave && (
+        <div className="fixed top-0 left-0 right-0 z-50 text-center text-[11px] sm:text-xs text-amber-700 bg-amber-50 border-b border-amber-200 py-1">
+          10日以上保存していません。右上の「保存」を押してください。
+        </div>
+      )}
       <div className={shouldPromptSave ? "pt-7 sm:pt-8" : ""}>
         <Header />
-        {/* 本文：他タブと同等の余白 */}
+        {/* 他タブと同等の本文余白 */}
         <div className="w-full max-w-none px-4 sm:px-6 py-4">
           {renderCategory("upper", "上半身")}
           {renderCategory("lower", "下半身")}
