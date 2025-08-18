@@ -1,3 +1,6 @@
+了解です。型エラー（`DayRecord` の必須プロパティ `sets` など）に対応した**差し替え用の全文**です。`useState` 初期値を `makeEmptyDayRecord` にし、保存時も `sets/reps` を空オブジェクトで正規化しています。`lucide-react` は使っていません。
+
+```tsx
 // src/tabs/RecordTab.tsx
 "use client";
 
@@ -108,9 +111,7 @@ function loadExercises(): ExercisesGrouped {
       ).push(item);
     }
     for (const k of ["upper", "lower", "etc"] as const) {
-      grouped[k].sort(
-        (a: any, b: any) => (a?.order ?? 0) - (b?.order ?? 0)
-      );
+      grouped[k].sort((a: any, b: any) => (a?.order ?? 0) - (b?.order ?? 0));
     }
     return grouped;
   }
@@ -139,15 +140,26 @@ function loadExercises(): ExercisesGrouped {
       }
     }
     for (const k of ["upper", "lower", "etc"] as const) {
-      grouped[k].sort(
-        (a: any, b: any) => (a?.order ?? 0) - (b?.order ?? 0)
-      );
+      grouped[k].sort((a: any, b: any) => (a?.order ?? 0) - (b?.order ?? 0));
     }
     return grouped;
   }
 
   // デフォルト（何も無い場合）
   return { upper: [], lower: [], etc: [] };
+}
+
+/* --- 空の DayRecord を作成（型を満たす） --- */
+function makeEmptyDayRecord(date: string): DayRecord {
+  return {
+    date,
+    notes: "",
+    notesUpper: "",
+    notesLower: "",
+    // 型要件を満たすため空オブジェクトを用意
+    sets: {},
+    reps: {},
+  } as DayRecord;
 }
 
 /* --- 本体 --- */
@@ -157,7 +169,7 @@ export default function RecordTab() {
 
   const [exercises, setExercises] = useState<ExercisesGrouped>({ upper: [], lower: [], etc: [] });
   const [rec, setRec] = useState<DayRecord>(
-    () => loadDayRecord(todayStr) ?? { date: todayStr, notes: "", notesUpper: "", notesLower: "" }
+    () => loadDayRecord(todayStr) ?? makeEmptyDayRecord(todayStr)
   );
 
   /* --- 保存まわりの監視 --- */
@@ -200,12 +212,14 @@ export default function RecordTab() {
     return () => window.removeEventListener("beforeunload", handler);
   }, [hasUnsavedChanges, shouldPromptSave]);
 
-  // 保存ヘルパー（空上書き防止）
+  // 保存ヘルパー（空上書き防止・型正規化）
   const persist = (next: DayRecord) => {
     const normalized: DayRecord = {
       ...next,
       notesUpper: next.notesUpper ?? "",
       notesLower: next.notesLower ?? "",
+      sets: next.sets ?? {},
+      reps: next.reps ?? {},
     };
     saveDayRecord(todayStr, normalized);
     setRec(normalized);
@@ -417,4 +431,4 @@ function CheckInput({
     </div>
   );
 }
-
+```
