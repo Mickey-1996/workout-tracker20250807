@@ -17,7 +17,8 @@ import { loadJSON, saveJSON } from "@/lib/local-storage";
 import { defaultExercises } from "@/lib/exercises-default";
 
 const SETTINGS_KEY = "settings-v1";
-const SETTINGS_DOWNLOAD_FILENAME = "settings.latest.json";
+// ✅ 仕様：固定ファイル名に変更（.jsonは付けない）
+const SETTINGS_DOWNLOAD_FILENAME = "settings.latest";
 
 /** types.ts は触らず UI 側だけで拡張 */
 type ExtendedExerciseItem = ExerciseItem & {
@@ -34,13 +35,12 @@ type Settings = { items: ExtendedExerciseItem[] };
 const cmpOrderName = (a: ExtendedExerciseItem, b: ExtendedExerciseItem) =>
   (a.order ?? 0) - (b.order ?? 0) || (a.name ?? "").localeCompare(b.name ?? "");
 
-/** v1(upper/lower/other|etc) を内部表記 upper/lower/other に寄せる */
 type Cat3 = "upper" | "lower" | "other";
 const toCat3 = (c: any): Cat3 =>
   c === "upper" || c === "lower" ? c : "other";
 
 function normalizeOrders(list: ExtendedExerciseItem[]): ExtendedExerciseItem[] {
-  const out = list.map((x) => ({ ...x, category: toCat3(x.category) })); // 破壊的変更を避ける + category 正規化
+  const out = list.map((x) => ({ ...x, category: toCat3(x.category) }));
   (["upper", "lower", "other"] as Cat3[]).forEach((cat) => {
     const grp = out.filter((x) => toCat3(x.category) === cat).sort(cmpOrderName);
     grp.forEach((x, i) => {
@@ -91,7 +91,6 @@ function groupForCompat(list: ExtendedExerciseItem[]) {
   }
   return g;
 }
-/* ========================================== */
 
 function newItem(cat: Cat3): ExtendedExerciseItem {
   return {
@@ -196,7 +195,7 @@ export default function SettingsTab() {
     saveJSON("wt:settings.v2", data);
     saveJSON("exercises", groupForCompat(normalized));
 
-    // ダウンロード（固定名）
+    // ✅ ダウンロード（固定名：settings.latest）
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -207,7 +206,7 @@ export default function SettingsTab() {
     a.remove();
     URL.revokeObjectURL(url);
 
-    alert("設定を保存しました（Downloads に settings.latest.json を出力）。");
+    alert("設定を保存しました（Downloads に settings.latest を出力）。");
   };
 
   const handleClickRestore = () => fileRef.current?.click();
@@ -377,7 +376,8 @@ export default function SettingsTab() {
         <input
           ref={fileRef}
           type="file"
-          accept="application/json"
+          // ✅ 拡張子なし（settings.latest）を拾えるよう accept を広げる
+          accept=".latest,.json,application/json,*/*"
           className="hidden"
           onChange={handleRestoreFile}
         />
