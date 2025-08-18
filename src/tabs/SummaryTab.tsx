@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState, CSSProperties } from "react";
+import { useEffect, useMemo, useState, CSSProperties, useRef } from "react";
+import type React from "react";
 import { Card } from "@/components/ui/Card";
 import { loadDayRecord, loadJSON } from "@/lib/local-storage";
 import { DayPicker } from "react-day-picker";
@@ -193,6 +194,61 @@ export default function SummaryTab() {
     day: { margin: 2 },
   };
 
+  /* ------ 復元（record.latest.json を読み込む） ------ */
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleClickRestore = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleRestoreFile: React.ChangeEventHandler<HTMLInputElement> = async (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    try {
+      const text = await f.text();
+      const json = JSON.parse(text);
+
+      if (typeof json !== "object" || json === null) {
+        alert("JSONの形式が不正です。");
+        return;
+      }
+
+      let added = 0, skipped = 0;
+      for (const [k, v] of Object.entries(json as Record<string, unknown>)) {
+        if (!k.startsWith("day:")) continue;           // 記録データのみ対象
+        if (localStorage.getItem(k) != null) {         // 衝突時は Safari メモリ優先（上書きしない）
+          skipped++;
+          continue;
+        }
+        try {
+          localStorage.setItem(k, JSON.stringify(v));  // 無い日のみ追加
+          added++;
+        } catch { /* 個別項目の失敗は無視 */ }
+      }
+
+      // 変更検知用シグネチャを更新（RecordTabの未保存判定のズレ防止）
+      try {
+        const keys: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith("day:")) keys.push(key);
+        }
+        keys.sort();
+        const sigSrc = keys.map(k => `${k}:${localStorage.getItem(k)}`).join("|");
+        let h = 5381; // djb2
+        for (let i = 0; i < sigSrc.length; i++) h = ((h << 5) + h) + sigSrc.charCodeAt(i);
+        const sig = (h >>> 0).toString(16);
+        localStorage.setItem("wt:lastSavedSig", sig);
+      } catch {}
+
+      alert(`復元完了: 新規 ${added} 件 / 既存 ${skipped} 件（保持）`);
+    } catch (err: any) {
+      alert(`復元に失敗しました: ${err?.message ?? err}`);
+    } finally {
+      e.target.value = ""; // 同じファイルを再選択できるようにリセット
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* カレンダー */}
@@ -200,6 +256,24 @@ export default function SummaryTab() {
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-base font-semibold">カレンダー</h2>
           <div className="text-sm text-slate-500">{ymdLocal(today)}（今日）</div>
+        </div>
+
+        {/* 復元ボタン（右寄せ・1行） */}
+        <div className="mb-2 flex justify-end">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/json"
+            className="hidden"
+            onChange={handleRestoreFile}
+          />
+          <button
+            type="button"
+            className="rounded-md border px-3 py-1 text-sm hover:bg-slate-50"
+            onClick={handleClickRestore}
+          >
+            復元
+          </button>
         </div>
 
         <DayPicker
@@ -337,7 +411,7 @@ export default function SummaryTab() {
       <Card className="p-4">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-base font-semibold">週合計（種目別）</h2>
-          <div className="text-sm text-slate-500">{weekAggByItem.rangeLabel}</div>
+        <div className="text-sm text-slate-500">{weekAggByItem.rangeLabel}</div>
         </div>
 
         {weekAggByItem.rows.length === 0 ? (
