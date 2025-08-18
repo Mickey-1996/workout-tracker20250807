@@ -98,7 +98,7 @@ function loadExercises(): ExercisesGrouped {
 
 /* empty DayRecord (type-safe) */
 function makeEmptyDayRecord(date: string): DayRecord {
-  return { date, notes: "", notesUpper: "", notesLower: "", sets: {}, reps: {} } as DayRecord;
+  return { date, notes: "", notesUpper: "", notesLower: "", sets: {} } as DayRecord;
 }
 
 /* Component */
@@ -132,10 +132,18 @@ export default function RecordTab() {
     return () => window.removeEventListener("beforeunload", handler);
   }, [hasUnsavedChanges, shouldPromptSave]);
 
-  const persist = (next: DayRecord) => {
-    const normalized: DayRecord = { ...next, notesUpper: next.notesUpper ?? "", notesLower: next.notesLower ?? "", sets: next.sets ?? {}, reps: next.reps ?? {} };
-    saveDayRecord(todayStr, normalized);
-    setRec(normalized);
+  // NOTE: keep possible extra fields (like reps) without typing them on DayRecord
+  const persist = (next: any) => {
+    const normalized: any = {
+      ...next,
+      notesUpper: next?.notesUpper ?? "",
+      notesLower: next?.notesLower ?? "",
+      sets: next?.sets ?? {},
+      // keep next.reps if it exists, but don't require it
+      ...(next?.reps ? { reps: next.reps } : {}),
+    };
+    saveDayRecord(todayStr, normalized as DayRecord);
+    setRec(normalized as DayRecord);
     setCurrentSig(calcRecordsSignature());
   };
 
@@ -183,18 +191,18 @@ export default function RecordTab() {
           <div className="text-sm text-slate-600 mb-1">{memoLabel}</div>
           <Textarea
             value={
-              category === "upper" ? (rec.notesUpper ?? "")
-              : category === "lower" ? (rec.notesLower ?? "")
+              category === "upper" ? (rec as any).notesUpper ?? ""
+              : category === "lower" ? (rec as any).notesLower ?? ""
               : (rec as any).notesEtc ?? ""
             }
             onChange={(e) => {
               const v = e.target.value;
-              const next: DayRecord = {
+              const next: any = {
                 ...rec,
-                notesUpper: category === "upper" ? v : (rec.notesUpper ?? ""),
-                notesLower: category === "lower" ? v : (rec.notesLower ?? ""),
+                notesUpper: category === "upper" ? v : (rec as any).notesUpper ?? "",
+                notesLower: category === "lower" ? v : (rec as any).notesLower ?? "",
                 ...(category === "etc" ? { notesEtc: v } : {}),
-              } as any;
+              };
               persist(next);
             }}
             placeholder="(例) アーチャープッシュアップも10回やった"
@@ -255,9 +263,13 @@ export default function RecordTab() {
 /* Inputs */
 function RepInput({
   rec, id, target, onChange, markDone,
-}: { rec: DayRecord; id: string; target: number; onChange: (next: DayRecord) => void; markDone: (id: string) => void; }) {
-  const [val, setVal] = useState<number>(Number(rec.reps?.[id] ?? 0));
-  useEffect(() => setVal(Number(rec.reps?.[id] ?? 0)), [rec, id]);
+}: { rec: DayRecord; id: string; target: number; onChange: (next: any) => void; markDone: (id: string) => void; }) {
+  const currentReps = (rec as any).reps ?? {};
+  const [val, setVal] = useState<number>(Number(currentReps[id] ?? 0));
+  useEffect(() => {
+    setVal(Number(((rec as any).reps ?? {})[id] ?? 0));
+  }, [rec, id]);
+
   return (
     <div className="flex items-center gap-2">
       <input
@@ -267,8 +279,9 @@ function RepInput({
         onChange={(e) => setVal(Number(e.target.value || 0))}
         onBlur={() => {
           const n = Number.isFinite(val) ? Math.max(0, Math.floor(val)) : 0;
-          const next = { ...rec, reps: { ...(rec.reps ?? {}), [id]: n } };
-          onChange(next); if (n > 0) markDone(id);
+          const next: any = { ...rec, reps: { ...(currentReps as any), [id]: n } };
+          onChange(next);
+          if (n > 0) markDone(id);
         }}
       />
       <span className="text-xs text-slate-500">/ 目標 {target}</span>
@@ -278,18 +291,19 @@ function RepInput({
 
 function CheckInput({
   rec, id, setCount, onChange, markDone,
-}: { rec: DayRecord; id: string; setCount: number; onChange: (next: DayRecord) => void; markDone: (id: string) => void; }) {
+}: { rec: DayRecord; id: string; setCount: number; onChange: (next: any) => void; markDone: (id: string) => void; }) {
   function makeSetArray(n: number): number[] {
     const c = Math.max(1, Math.min(10, isFinite(n) ? Math.floor(n) : 3));
     return Array.from({ length: c }, (_, i) => i);
   }
-  const checks = rec.sets?.[id] ?? Array.from({ length: setCount }, () => false);
+  const checks = (rec as any).sets?.[id] ?? Array.from({ length: setCount }, () => false);
   return (
     <div className="flex items-center gap-2">
       {makeSetArray(setCount).map((idx) => {
         const toggle = () => {
-          const nextChecks = [...checks]; nextChecks[idx] = !nextChecks[idx];
-          const next = { ...rec, sets: { ...(rec.sets ?? {}), [id]: nextChecks } };
+          const nextChecks = [...checks];
+          nextChecks[idx] = !nextChecks[idx];
+          const next: any = { ...rec, sets: { ...(rec as any).sets ?? {}, [id]: nextChecks } };
           onChange(next); if (nextChecks[idx]) markDone(id);
         };
         return (
