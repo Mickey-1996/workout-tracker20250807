@@ -168,6 +168,21 @@ export default function RecordTab() {
     return () => window.removeEventListener("beforeunload", handler);
   }, [hasUnsavedChanges, shouldPromptSave]);
 
+  /** saveDayRecord の受け取り型に合わせて安全に保存 */
+  const saveSafe = (date: string, data: DayRecord) => {
+    const normalized: DayRecord = {
+      date: data.date,
+      times: (data.times ?? {}) as Record<string, string[]>,
+      sets: (data.sets ?? {}) as Record<string, boolean[]>,
+      counts: (data.counts ?? {}) as Record<string, number[]>,
+      notesUpper: data.notesUpper ?? "",
+      notesLower: data.notesLower ?? "",
+      notesEtc: data.notesEtc ?? "",
+    };
+    // パラメータ型を直接参照してキャスト
+    saveDayRecord(date, normalized as Parameters<typeof saveDayRecord>[1]);
+  };
+
   /** 当日の記録を保存（最初から DayRecord として正規化） */
   const persist = (next: DayRecord) => {
     const normalized: DayRecord = {
@@ -185,7 +200,7 @@ export default function RecordTab() {
       return;
     }
     setRec(normalized);
-    saveDayRecord(todayStr, normalized);
+    saveSafe(todayStr, normalized);
     setCurrentSig(calcRecordsSignature());
   };
 
@@ -225,7 +240,7 @@ export default function RecordTab() {
     </div>
   );
 
-  // 正方形56pxのセレクト/チェック
+  // 正方形56pxのセレクト/チェック（数値は最大15）
   const SquareCount = ({
     value,
     onChange,
@@ -237,7 +252,7 @@ export default function RecordTab() {
           <SelectValue placeholder="0" />
         </SelectTrigger>
         <SelectContent>
-          {Array.from({ length: max + 1 }, (_, n) => n).map((n) => (
+          {Array.from({ length: Math.min(max, 15) + 1 }, (_, n) => n).map((n) => (
             <SelectItem key={n} value={String(n)}>{n}</SelectItem>
           ))}
         </SelectContent>
@@ -312,7 +327,7 @@ export default function RecordTab() {
                                 notesLower: prev.notesLower ?? "",
                                 notesEtc:   prev.notesEtc   ?? "",
                               };
-                              saveDayRecord(todayStr, next);
+                              saveSafe(todayStr, next);
                               setCurrentSig(calcRecordsSignature());
                               return next;
                             });
@@ -340,7 +355,7 @@ export default function RecordTab() {
                                 notesLower: prev.notesLower ?? "",
                                 notesEtc:   prev.notesEtc   ?? "",
                               };
-                              saveDayRecord(todayStr, next);
+                              saveSafe(todayStr, next);
                               setCurrentSig(calcRecordsSignature());
                               return next;
                             });
@@ -411,4 +426,3 @@ function formatHours(ms: number): string {
   const hours = Math.max(0, Math.floor(ms / (1000 * 60 * 60)));
   return `${hours}時間`;
 }
-
