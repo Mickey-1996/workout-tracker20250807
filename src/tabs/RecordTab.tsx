@@ -7,7 +7,24 @@ import { Textarea } from "@/components/ui/Textarea";
 import { Checkbox } from "@/components/ui/Checkbox";
 import { loadDayRecord, saveDayRecord, loadJSON } from "@/lib/local-storage";
 import type { ExerciseItem, DayRecord, Category, InputMode } from "@/lib/types";
-import { CalendarIcon } from "lucide-react";
+
+/* --- インラインSVG：Calendar アイコン（lucide-react 非依存） --- */
+function CalendarIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      aria-hidden="true"
+    >
+      <rect x="3" y="4" width="18" height="17" rx="2" ry="2" strokeWidth="1.5" />
+      <line x1="3" y1="9" x2="21" y2="9" strokeWidth="1.5" />
+      <line x1="8" y1="2.5" x2="8" y2="6" strokeWidth="1.5" />
+      <line x1="16" y1="2.5" x2="16" y2="6" strokeWidth="1.5" />
+    </svg>
+  );
+}
 
 /* --- ユーティリティ --- */
 function toYmd(d: Date): string {
@@ -289,7 +306,14 @@ export default function RecordTab() {
 
         {/* 日付表示（① 左寄せ） */}
         <div className="mb-4 flex items-center justify-start">
-          <div className="text-slate-700">{displayDate}</div>
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <CalendarIcon className="w-5 h-5 text-slate-500" />
+            <time dateTime={todayStr}>
+              {`${today.getFullYear()}年${String(today.getMonth() + 1).padStart(2, "0")}月${String(
+                today.getDate()
+              ).padStart(2, "0")}日`}
+            </time>
+          </div>
         </div>
 
         {renderCategory("upper", "上半身")}
