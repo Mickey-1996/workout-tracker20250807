@@ -100,24 +100,14 @@ function saveAsJsonLikeSettings(filename: string, data: unknown): boolean {
     const blob = new Blob([text], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.rel = "noopener";
-    a.style.display = "none";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    a.href = url; a.download = filename; a.rel = "noopener"; a.style.display = "none";
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
     return true;
   } catch {
     try {
-      const dataUrl =
-        "data:application/json;charset=utf-8," + encodeURIComponent(text);
-      window.open(dataUrl, "_blank");
-      return true;
-    } catch {
-      return false;
-    }
+      const dataUrl = "data:application/json;charset=utf-8," + encodeURIComponent(text);
+      window.open(dataUrl, "_blank"); return true;
+    } catch { return false; }
   }
 }
 
@@ -192,15 +182,13 @@ export default function RecordTab() {
     notesEtc: "",
   });
 
-  // 署名（UIへの表示はしない）
+  // 署名（UI表示はしない）
   const [lastDiskSaveAt, setLastDiskSaveAt] = useState<number>(0);
   const [lastSavedSig, setLastSavedSig] = useState<string>("");
   const [currentSig, setCurrentSig] = useState<string>("");
 
   useEffect(() => {
-    try {
-      setExercises(loadExercises());
-    } catch {}
+    try { setExercises(loadExercises()); } catch {}
     try {
       const loaded = loadDayRecord(todayStr) as DayRecord | null | undefined;
       if (loaded)
@@ -377,7 +365,7 @@ export default function RecordTab() {
   const renderCategory = (key: "upper" | "lower" | "etc", label: string) => {
     const items = exercises[key].filter((it) => it.enabled ?? true);
     return (
-      <Card className="mb-6 p-2 sm:p-5">
+      <Card className="mb-6 p-1 sm:p-5">{/* ← 内枠をさらに広く（p-1） */}
         <div className="mb-2 font-semibold">{label}</div>
 
         <div className="space-y-4">
@@ -403,7 +391,7 @@ export default function RecordTab() {
             return (
               <div
                 key={id}
-                className="rounded-lg border border-slate-200 p-2 sm:p-4 overflow-hidden"
+                className="rounded-lg border border-slate-200 p-1 sm:p-4 overflow-hidden"
               >
                 <div className="text-sm text-slate-700 break-words font-medium">
                   {it.name}
@@ -415,7 +403,7 @@ export default function RecordTab() {
                 </div>
 
                 {/* 入力列：右寄せ・はみ出し防止 */}
-                <div className="mt-2 w-full overflow-hidden pr-1">
+                <div className="mt-2 w-full overflow-hidden pr-0">{/* pr-0 でさらに広く */}
                   <div
                     className="
                       ml-auto grid
@@ -530,7 +518,6 @@ export default function RecordTab() {
 
   return (
     <>
-      {/* バナー分＋ノッチ分だけ本文の上余白を確保（inline style で上書き） */}
       <div
         className={shouldPromptSave ? "pt-7 sm:pt-8" : ""}
         style={
@@ -541,9 +528,8 @@ export default function RecordTab() {
       >
         <Banner />
         <Header />
-
-        {/* 本文余白：px-3 にして外枠を広げる */}
-        <div className="w-full max-w-none px-3 sm:px-6 py-4">
+        {/* 外枠の左右余白をさらに絞る（=表示領域を広げる） */}
+        <div className="w-full max-w-none px-2 sm:px-8 py-4">
           {renderCategory("upper", "上半身")}
           {renderCategory("lower", "下半身")}
           {renderCategory("etc", "その他")}
