@@ -55,7 +55,13 @@ function calcRecordsSignature(): string {
   return hashString(ordered);
 }
 
-/* exercises grouped: allow whatever Category defines */
+/* 入力モードの安全判定（型に依存せず判別可能に） */
+function isRepsMode(m: unknown): boolean {
+  const s = String(m ?? "");
+  return s === "reps" || s === "rep" || s === "count" || s === "counts" || s === "number";
+}
+
+/* exercises grouped: Category に追従（other / etc 両対応） */
 type ExercisesGrouped = Partial<Record<Category, any[]>>;
 
 function loadExercises(): ExercisesGrouped {
@@ -84,7 +90,6 @@ function loadExercises(): ExercisesGrouped {
       if (!grouped[cat]) grouped[cat] = [];
       grouped[cat]!.push(item);
     }
-    // order by 'order' if present
     for (const k in grouped) {
       (grouped[k as Category] as any[])?.sort?.((a: any, b: any) => (a?.order ?? 0) - (b?.order ?? 0));
     }
@@ -94,7 +99,7 @@ function loadExercises(): ExercisesGrouped {
   // legacy: exercises / settings
   const legacy = loadJSON<any>("exercises") ?? loadJSON<any>("settings");
   if (legacy && (legacy.upper || legacy.lower || legacy.etc || legacy.other)) {
-    const keys = ["upper", "lower", "other", "etc"] as const; // accept both other/etc from old data
+    const keys = ["upper", "lower", "other", "etc"] as const;
     for (const key of keys) {
       const arr = legacy[key] as any[] | undefined;
       if (!arr) continue;
@@ -165,7 +170,7 @@ export default function RecordTab() {
     return () => window.removeEventListener("beforeunload", handler);
   }, [hasUnsavedChanges, shouldPromptSave]);
 
-  // keep unknown fields like 'reps' if存在
+  // keep unknown fields like 'reps' が存在すれば保持
   const persist = (next: any) => {
     const normalized: any = {
       ...next,
@@ -193,16 +198,19 @@ export default function RecordTab() {
         <h2 className="mb-2 mt-6 text-lg font-semibold">{title}</h2>
         <div className="grid gap-4 sm:grid-cols-2">
           {sorted.map((it: any) => {
-            const mode: InputMode = (it.inputMode ?? it.mode ?? "check") as InputMode;
-            const setCount: number = typeof it.sets === "number" ? it.sets : typeof it.checkCount === "number" ? it.checkCount : 3;
+            const mode = (it.inputMode ?? it.mode ?? "check") as InputMode | string;
+            const setCount: number =
+              typeof it.sets === "number" ? it.sets :
+              typeof it.checkCount === "number" ? it.checkCount : 3;
             const repTarget: number = typeof it.repTarget === "number" ? it.repTarget : 10;
+
             return (
               <Card key={it.id} className="p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="font-medium">{it.name}</div>
-                  <div className="text-xs text-slate-500">{mode === "reps" ? "回数入力" : "チェック"}</div>
+                  <div className="text-xs text-slate-500">{isRepsMode(mode) ? "回数入力" : "チェック"}</div>
                 </div>
-                {mode === "reps" ? (
+                {isRepsMode(mode) ? (
                   <div className="space-y-2">
                     <div className="text-xs text-slate-500">目標回数</div>
                     <RepInput rec={rec} id={it.id} target={repTarget} onChange={persist} markDone={markDone} />
@@ -250,7 +258,7 @@ export default function RecordTab() {
     <>
       {shouldPromptSave && (
         <div className="fixed top-0 left-0 right-0 z-50 text-center text-xs text-amber-700 bg-amber-50 border-b border-amber-200 py-1" role="status" aria-live="polite">
-          10日以上保存していません。右上の「保存」を押してください。
+          10日以上ディスクに保存していません。右上の「保存」を押してください。
         </div>
       )}
 
@@ -286,7 +294,7 @@ export default function RecordTab() {
 
         {renderCategory("upper", "上半身")}
         {renderCategory("lower", "下半身")}
-        {/* 任意の第3カテゴリ（other/etc）が存在する場合のみ表示。Category の union に依存せず安全に呼び出し */}
+        {/* 第3カテゴリ（other / etc）いずれか存在時のみ表示 */}
         {Array.isArray((exercises as any)["other"]) && (exercises as any)["other"].length > 0
           ? renderCategory("other" as Category, "その他")
           : Array.isArray((exercises as any)["etc"]) && (exercises as any)["etc"].length > 0
