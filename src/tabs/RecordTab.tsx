@@ -1,4 +1,3 @@
-```tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -415,4 +414,3 @@ function Checks5PerRow({
     </div>
   );
 }
-```
