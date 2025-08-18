@@ -55,49 +55,82 @@ function calcRecordsSignature(): string {
   return hashString(ordered);
 }
 
-/* exercises grouped (any for backward compat) */
-type ExercisesGrouped = { upper: any[]; lower: any[]; etc: any[]; };
+/* exercises grouped: allow whatever Category defines */
+type ExercisesGrouped = Partial<Record<Category, any[]>>;
 
 function loadExercises(): ExercisesGrouped {
+  const grouped: ExercisesGrouped = {};
+
+  // v2 format
   const v2 = loadJSON<any>("wt:settings.v2");
   if (v2?.items && Array.isArray(v2.items)) {
-    const grouped: ExercisesGrouped = { upper: [], lower: [], etc: [] };
     for (const it of v2.items as any[]) {
+      const cat = (it.category ?? "other") as Category;
       const item = {
-        id: String(it.id ?? ""), name: String(it.name ?? ""),
-        category: (it.category ?? "etc") as Category,
+        id: String(it.id ?? ""),
+        name: String(it.name ?? ""),
+        category: cat,
         enabled: Boolean(it.enabled ?? true),
         inputMode: (it.inputMode ?? it.mode ?? "check") as InputMode,
-        sets: typeof it.sets === "number" ? it.sets : typeof it.checkCount === "number" ? it.checkCount : 3,
-        repTarget: it.repTarget, order: it.order,
+        sets:
+          typeof it.sets === "number"
+            ? it.sets
+            : typeof it.checkCount === "number"
+            ? it.checkCount
+            : 3,
+        repTarget: it.repTarget,
+        order: it.order,
       };
-      (item.category === "upper" ? grouped.upper : item.category === "lower" ? grouped.lower : grouped.etc).push(item);
+      if (!grouped[cat]) grouped[cat] = [];
+      grouped[cat]!.push(item);
     }
-    for (const k of ["upper", "lower", "etc"] as const) grouped[k].sort((a: any, b: any) => (a?.order ?? 0) - (b?.order ?? 0));
+    // order by 'order' if present
+    for (const k in grouped) {
+      (grouped[k as Category] as any[])?.sort?.((a: any, b: any) => (a?.order ?? 0) - (b?.order ?? 0));
+    }
     return grouped;
   }
+
+  // legacy: exercises / settings
   const legacy = loadJSON<any>("exercises") ?? loadJSON<any>("settings");
-  if (legacy?.upper || legacy?.lower || legacy?.etc) {
-    const grouped: ExercisesGrouped = { upper: [], lower: [], etc: [] };
-    for (const k of ["upper", "lower", "etc"] as const) {
-      for (const it of (legacy[k] ?? []) as any[]) {
-        grouped[k].push({
-          id: String(it.id ?? ""), name: String(it.name ?? ""), category: k as Category,
+  if (legacy && (legacy.upper || legacy.lower || legacy.etc || legacy.other)) {
+    const keys = ["upper", "lower", "other", "etc"] as const; // accept both other/etc from old data
+    for (const key of keys) {
+      const arr = legacy[key] as any[] | undefined;
+      if (!arr) continue;
+      const cat = (key === "etc" ? "other" : key) as Category;
+      for (const it of arr) {
+        const item = {
+          id: String(it.id ?? ""),
+          name: String(it.name ?? ""),
+          category: cat,
           enabled: Boolean(it.enabled ?? true),
           inputMode: (it.inputMode ?? it.mode ?? "check") as InputMode,
-          sets: typeof it.sets === "number" ? it.sets : typeof it.checkCount === "number" ? it.checkCount : 3,
-          repTarget: it.repTarget, order: it.order,
-        });
+          sets:
+            typeof it.sets === "number"
+              ? it.sets
+              : typeof it.checkCount === "number"
+              ? it.checkCount
+              : 3,
+          repTarget: it.repTarget,
+          order: it.order,
+        };
+        if (!grouped[cat]) grouped[cat] = [];
+        grouped[cat]!.push(item);
       }
     }
-    for (const k of ["upper", "lower", "etc"] as const) grouped[k].sort((a: any, b: any) => (a?.order ?? 0) - (b?.order ?? 0));
+    for (const k in grouped) {
+      (grouped[k as Category] as any[])?.sort?.((a: any, b: any) => (a?.order ?? 0) - (b?.order ?? 0));
+    }
     return grouped;
   }
-  return { upper: [], lower: [], etc: [] };
+
+  return grouped;
 }
 
 /* empty DayRecord (type-safe) */
 function makeEmptyDayRecord(date: string): DayRecord {
+  // DayRecord に reps プロパティが無い前提（存在すれば保持）
   return { date, notes: "", notesUpper: "", notesLower: "", sets: {} } as DayRecord;
 }
 
@@ -106,7 +139,7 @@ export default function RecordTab() {
   const today = new Date();
   const todayStr = toYmd(today);
 
-  const [exercises, setExercises] = useState<ExercisesGrouped>({ upper: [], lower: [], etc: [] });
+  const [exercises, setExercises] = useState<ExercisesGrouped>({});
   const [rec, setRec] = useState<DayRecord>(() => loadDayRecord(todayStr) ?? makeEmptyDayRecord(todayStr));
 
   const [lastDiskSaveAt, setLastDiskSaveAt] = useState<number | null>(null);
@@ -132,14 +165,13 @@ export default function RecordTab() {
     return () => window.removeEventListener("beforeunload", handler);
   }, [hasUnsavedChanges, shouldPromptSave]);
 
-  // NOTE: keep possible extra fields (like reps) without typing them on DayRecord
+  // keep unknown fields like 'reps' if存在
   const persist = (next: any) => {
     const normalized: any = {
       ...next,
       notesUpper: next?.notesUpper ?? "",
       notesLower: next?.notesLower ?? "",
       sets: next?.sets ?? {},
-      // keep next.reps if it exists, but don't require it
       ...(next?.reps ? { reps: next.reps } : {}),
     };
     saveDayRecord(todayStr, normalized as DayRecord);
@@ -193,7 +225,7 @@ export default function RecordTab() {
             value={
               category === "upper" ? (rec as any).notesUpper ?? ""
               : category === "lower" ? (rec as any).notesLower ?? ""
-              : (rec as any).notesEtc ?? ""
+              : (rec as any).notesEtc ?? (rec as any).notesOther ?? ""
             }
             onChange={(e) => {
               const v = e.target.value;
@@ -201,7 +233,7 @@ export default function RecordTab() {
                 ...rec,
                 notesUpper: category === "upper" ? v : (rec as any).notesUpper ?? "",
                 notesLower: category === "lower" ? v : (rec as any).notesLower ?? "",
-                ...(category === "etc" ? { notesEtc: v } : {}),
+                ...(category === "other" || category === "etc" ? { notesOther: v } : {}),
               };
               persist(next);
             }}
@@ -218,7 +250,7 @@ export default function RecordTab() {
     <>
       {shouldPromptSave && (
         <div className="fixed top-0 left-0 right-0 z-50 text-center text-xs text-amber-700 bg-amber-50 border-b border-amber-200 py-1" role="status" aria-live="polite">
-          10日以上ディスクに保存していません。右上の「保存」を押してください。
+          10日以上保存していません。右上の「保存」を押してください。
         </div>
       )}
 
@@ -254,7 +286,12 @@ export default function RecordTab() {
 
         {renderCategory("upper", "上半身")}
         {renderCategory("lower", "下半身")}
-        {exercises.etc?.length ? renderCategory("etc", "その他") : null}
+        {/* 任意の第3カテゴリ（other/etc）が存在する場合のみ表示。Category の union に依存せず安全に呼び出し */}
+        {Array.isArray((exercises as any)["other"]) && (exercises as any)["other"].length > 0
+          ? renderCategory("other" as Category, "その他")
+          : Array.isArray((exercises as any)["etc"]) && (exercises as any)["etc"].length > 0
+          ? renderCategory("etc" as Category, "その他")
+          : null}
       </div>
     </>
   );
