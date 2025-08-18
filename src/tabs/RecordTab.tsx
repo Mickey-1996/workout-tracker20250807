@@ -19,7 +19,7 @@ import type {
   Category,
 } from "@/lib/types";
 
-/* ================== Utils ================== */
+/* ============== Utils ============== */
 const EXPORT_FILENAME = "workoutrecord.latest";
 
 const toYmd = (d: Date) =>
@@ -38,7 +38,7 @@ const padCounts = (src: number[] | undefined, setCount: number) => {
 };
 const padChecks = (src: boolean[] | undefined, setCount: number) => {
   const c = clampSets(setCount);
-  const base = Array.isArray(src) ? [...src] : []; // ← [.src] の誤字を修正
+  const base = Array.isArray(src) ? [...src] : [];
   while (base.length < c) base.push(false);
   return base.slice(0, c);
 };
@@ -51,7 +51,7 @@ function hashString(s: string) {
   return (h >>> 0).toString(16);
 }
 
-/** これは「日別記録」だけを集める。キー名の差異に強い実装に変更 */
+/** 日別実績を収集（キー名差異にも耐性） */
 function isDayRecordObject(x: any): boolean {
   return (
     x &&
@@ -70,9 +70,7 @@ function collectAllDayRecords(): Record<string, unknown> {
       if (!raw) continue;
       const parsed = JSON.parse(raw);
       if (keyLike.test(k) || isDayRecordObject(parsed)) out[k] = parsed;
-    } catch {
-      /* ignore broken entry */
-    }
+    } catch {}
   }
   return out;
 }
@@ -95,7 +93,7 @@ const hasAnyData = (r?: Partial<DayRecord>) => {
   return false;
 };
 
-/** SettingsTab方式のJSON保存（Blob→a[download]→revoke、失敗時 data:URL） */
+/** SettingsTab同等の保存 */
 function saveAsJsonLikeSettings(filename: string, data: unknown): boolean {
   const text = jsonString(data);
   try {
@@ -123,9 +121,8 @@ function saveAsJsonLikeSettings(filename: string, data: unknown): boolean {
   }
 }
 
-/* -------- 設定ロード（SettingsTabの保存形式に対応） -------- */
+/* -------- 設定ロード -------- */
 function loadExercises(): ExercisesGrouped {
-  // v2形式（settingsタブの最新仕様）
   const v2 = loadJSON<any>("wt:settings.v2");
   if (v2?.items && Array.isArray(v2.items)) {
     const grouped: ExercisesGrouped = { upper: [], lower: [], etc: [] };
@@ -158,7 +155,6 @@ function loadExercises(): ExercisesGrouped {
       grouped[k].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
     return grouped;
   }
-  // 旧形式フォールバック
   const raw = loadJSON<any>("exercises");
   if (raw?.upper || raw?.lower || raw?.etc)
     return { upper: raw.upper ?? [], lower: raw.lower ?? [], etc: raw.etc ?? [] };
@@ -168,7 +164,7 @@ function loadExercises(): ExercisesGrouped {
   return { upper: [], lower: [], etc: [] };
 }
 
-/* ================== Component ================== */
+/* ============== Component ============== */
 export default function RecordTab() {
   const today = useMemo(() => new Date(), []);
   const todayStr = useMemo(() => toYmd(today), [today]);
@@ -196,7 +192,7 @@ export default function RecordTab() {
     notesEtc: "",
   });
 
-  // 保存リマインド
+  // 署名（UIへの表示はしない）
   const [lastDiskSaveAt, setLastDiskSaveAt] = useState<number>(0);
   const [lastSavedSig, setLastSavedSig] = useState<string>("");
   const [currentSig, setCurrentSig] = useState<string>("");
@@ -228,7 +224,8 @@ export default function RecordTab() {
     () => (!lastDiskSaveAt ? Infinity : (Date.now() - lastDiskSaveAt) / (1000 * 60 * 60)),
     [lastDiskSaveAt]
   );
-  const shouldPromptSave = hoursSinceSave > 24 * 10;
+  // 初回保存前（0）は出さない
+  const shouldPromptSave = lastDiskSaveAt > 0 && hoursSinceSave > 24 * 10;
   const hasUnsavedChanges =
     currentSig !== "" && lastSavedSig !== "" && currentSig !== lastSavedSig;
 
@@ -243,7 +240,7 @@ export default function RecordTab() {
     return () => window.removeEventListener("beforeunload", handler);
   }, [hasUnsavedChanges, shouldPromptSave]);
 
-  /** saveDayRecord の引数に合わせて正規化して保存 */
+  /** 型を正規化して保存 */
   const saveSafe = (date: string, data: DayRecord) => {
     const normalized: DayRecord = {
       date: data.date,
@@ -277,10 +274,16 @@ export default function RecordTab() {
     setCurrentSig(calcRecordsSignature());
   };
 
-  /* ================== UI Parts ================== */
+  /* ---------- UI ---------- */
+
+  // 10日以上未保存なら上部に出すバナー（ノッチ対応）
   const Banner = () =>
     shouldPromptSave ? (
-      <div className="fixed top-0 left-0 right-0 z-50 text-center text-[11px] sm:text-xs text-amber-700 bg-amber-50 border-b border-amber-200 py-1">
+      <div
+        className="fixed top-0 left-0 right-0 z-50 text-center text-[11px] sm:text-xs text-amber-700 bg-amber-50 border-b border-amber-200 py-1"
+        style={{ paddingTop: "env(safe-area-inset-top)" }}
+        aria-live="polite"
+      >
         10日以上保存していません。右上の「保存」を押してください。
       </div>
     ) : null;
@@ -288,21 +291,16 @@ export default function RecordTab() {
   const Header = () => (
     <div className="sticky top-0 z-40 bg-white/90 backdrop-blur border-b">
       <div className="mx-auto w-full max-w-none px-3 sm:px-6 py-2 flex items-center justify-end">
-        {hasUnsavedChanges && (
-          <span className="mr-3 text-xs text-rose-600">未保存の変更があります</span>
-        )}
         <button
           type="button"
           className="rounded-md border px-3 py-1 text-sm hover:bg-slate-50"
           onClick={() => {
-            // ①当日分を確実に localStorage へ反映
+            // 先に当日分を確実反映
             saveSafe(todayStr, rec);
-
-            // ②全日分を収集して保存
+            // 全日分収集 → 保存
             const payload = collectAllDayRecords();
             const ok = saveAsJsonLikeSettings(EXPORT_FILENAME, payload);
-
-            // ③署名・時刻の更新
+            // 署名・時刻更新
             const sig = calcRecordsSignature();
             const t = Date.now();
             localStorage.setItem("wt:lastDiskSaveAt", String(t));
@@ -310,8 +308,7 @@ export default function RecordTab() {
             setLastDiskSaveAt(t);
             setLastSavedSig(sig);
             setCurrentSig(sig);
-
-            alert(ok ? `保存しました（${EXPORT_FILENAME}）` : "保存に失敗しました");
+            if (!ok) alert("保存に失敗しました");
           }}
           aria-label="記録データを保存"
         >
@@ -325,7 +322,7 @@ export default function RecordTab() {
     </div>
   );
 
-  // ▼ ボックスを 52px 正方形に縮小：iOSでも重ならないよう min-* + shrink-0 + block
+  // 50px 正方形
   const SquareCount = ({
     value,
     onChange,
@@ -335,9 +332,9 @@ export default function RecordTab() {
     onChange: (n: number) => void;
     max: number;
   }) => (
-    <div className="w-[52px] h-[52px] min-w-[52px] min-h-[52px] shrink-0 relative block">
+    <div className="w-[50px] h-[50px] min-w-[50px] min-h-[50px] shrink-0 relative block">
       <Select value={String(value)} onValueChange={(v) => onChange(Number(v))}>
-        <SelectTrigger className="h-[52px] w-[52px] p-0 text-lg justify-center leading-none box-border">
+        <SelectTrigger className="h-[50px] w-[50px] p-0 text-lg justify-center leading-none box-border">
           <SelectValue placeholder="0" />
         </SelectTrigger>
         <SelectContent
@@ -358,12 +355,12 @@ export default function RecordTab() {
 
   const SquareCheck = ({ on }: { on: boolean }) => (
     <div
-      className={`w-[52px] h-[52px] min-w-[52px] min-h-[52px] shrink-0 relative block rounded-md border flex items-center justify-center ${
+      className={`w-[50px] h-[50px] min-w-[50px] min-h-[50px] shrink-0 relative block rounded-md border flex items-center justify-center ${
         on ? "bg-emerald-500 border-emerald-600 text-white" : "border-slate-300"
       }`}
     >
       {on ? (
-        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
           <path
             d="M20 6L9 17l-5-5"
             fill="none"
@@ -380,7 +377,7 @@ export default function RecordTab() {
   const renderCategory = (key: "upper" | "lower" | "etc", label: string) => {
     const items = exercises[key].filter((it) => it.enabled ?? true);
     return (
-      <Card className="mb-6 p-3 sm:p-5">
+      <Card className="mb-6 p-2 sm:p-5">
         <div className="mb-2 font-semibold">{label}</div>
 
         <div className="space-y-4">
@@ -392,7 +389,6 @@ export default function RecordTab() {
             const countsArr = padCounts(rec.counts?.[id], setCount);
             const checksArr = padChecks(rec.sets?.[id], setCount);
 
-            // インターバル
             const times = rec.times?.[id] ?? [];
             const n = times.length;
             const last = n ? new Date(times[n - 1]) : null;
@@ -405,29 +401,28 @@ export default function RecordTab() {
                 : undefined;
 
             return (
-              <div key={id} className="rounded-lg border border-slate-200 p-3 sm:p-4">
-                {/* 種目名 */}
+              <div
+                key={id}
+                className="rounded-lg border border-slate-200 p-2 sm:p-4 overflow-hidden"
+              >
                 <div className="text-sm text-slate-700 break-words font-medium">
                   {it.name}
                 </div>
 
-                {/* インターバル（右寄せ） */}
                 <div className="mt-2 text-xs text-slate-500 text-right">
                   前回からのインターバル：
                   {intervalMs !== undefined ? formatHours(intervalMs) : "—"}
                 </div>
 
-                {/* 入力UI：右端寄せ・重なり防止 */}
-                <div className="mt-2 w-full">
+                {/* 入力列：右寄せ・はみ出し防止 */}
+                <div className="mt-2 w-full overflow-hidden pr-1">
                   <div
                     className="
-                      ml-auto
-                      grid
-                      [grid-template-columns:repeat(5,52px)]
-                      gap-x-2 gap-y-3
-                      auto-rows-[60px]
+                      ml-auto grid
+                      [grid-template-columns:repeat(5,50px)]
+                      gap-x-2 gap-y-3 auto-rows-[58px]
                       justify-items-end content-start
-                      w-[min(100%,320px)]
+                      w-auto
                     "
                   >
                     {mode === "count"
@@ -535,15 +530,20 @@ export default function RecordTab() {
 
   return (
     <>
-      {shouldPromptSave && (
-        <div className="fixed top-0 left-0 right-0 z-50 text-center text-[11px] sm:text-xs text-amber-700 bg-amber-50 border-b border-amber-200 py-1">
-          10日以上保存していません。右上の「保存」を押してください。
-        </div>
-      )}
-      <div className={shouldPromptSave ? "pt-7 sm:pt-8" : ""}>
+      {/* バナー分＋ノッチ分だけ本文の上余白を確保（inline style で上書き） */}
+      <div
+        className={shouldPromptSave ? "pt-7 sm:pt-8" : ""}
+        style={
+          shouldPromptSave
+            ? { paddingTop: "calc(env(safe-area-inset-top, 0px) + 2rem)" }
+            : undefined
+        }
+      >
+        <Banner />
         <Header />
-        {/* 他タブと同等の本文余白 */}
-        <div className="w-full max-w-none px-4 sm:px-6 py-4">
+
+        {/* 本文余白：px-3 にして外枠を広げる */}
+        <div className="w-full max-w-none px-3 sm:px-6 py-4">
           {renderCategory("upper", "上半身")}
           {renderCategory("lower", "下半身")}
           {renderCategory("etc", "その他")}
@@ -553,7 +553,7 @@ export default function RecordTab() {
   );
 }
 
-/* ===== インターバル時間（時間単位） ===== */
+/* ===== 時間表示（h単位） ===== */
 function formatHours(ms: number): string {
   const hours = Math.max(0, Math.floor(ms / (1000 * 60 * 60)));
   return `${hours}時間`;
