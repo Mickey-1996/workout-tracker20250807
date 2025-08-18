@@ -279,8 +279,8 @@ export default function RecordTab() {
 
   const Header = () => (
     <div className="sticky top-0 z-40 bg-white/90 backdrop-blur border-b">
-      {/* ▼ 外枠さらに広げ（スマホ）：px-1 / smは本文と揃えて px-8 */}
-      <div className="mx-auto w-full max-w-none px-1 sm:px-8 py-2 flex items-center justify-end">
+      {/* ▼ 外枠さらに広げ（スマホ）：px-0 / smは本文と揃えて px-8 */}
+      <div className="mx-auto w-full max-w-none px-0 sm:px-8 py-2 flex items-center justify-end">
         <button
           type="button"
           className="rounded-md border px-3 py-1 text-sm hover:bg-slate-50"
@@ -307,7 +307,7 @@ export default function RecordTab() {
       </div>
 
       {/* ▼ 日付行も同幅にあわせる */}
-      <div className="mx-auto w-full max-w-none px-1 sm:px-8 pb-2">
+      <div className="mx-auto w-full max-w-none px-0 sm:px-8 pb-2">
         <div className="text-slate-700">{displayDate}</div>
       </div>
     </div>
@@ -406,11 +406,11 @@ export default function RecordTab() {
                 </div>
 
                 {/* 入力列：右寄せ・はみ出し防止 */}
-                {/* ▼ 親ラッパを flex 右寄せ（子のgridは既存のまま） */}
+                {/* ▼ 親ラッパを flex 右寄せ（子のgridは既存のまま、ml-autoは削除） */}
                 <div className="mt-2 w-full overflow-hidden pr-0 flex justify-end">
                   <div
                     className="
-                      ml-auto grid
+                      grid shrink-0
                       [grid-template-columns:repeat(5,50px)]
                       gap-x-2 gap-y-3 auto-rows-[58px]
                       justify-items-end content-start
@@ -532,8 +532,8 @@ export default function RecordTab() {
       >
         <Banner />
         <Header />
-        {/* ▼ 外枠の左右余白をさらに絞る（=実効表示幅を拡大） */}
-        <div className="w-full max-w-none px-1 sm:px-8 py-4">
+        {/* ▼ 外枠の左右余白をさらに絞る（=実効表示幅を最大化） */}
+        <div className="w-full max-w-none px-0 sm:px-8 py-4">
           {renderCategory("upper", "上半身")}
           {renderCategory("lower", "下半身")}
           {renderCategory("etc", "その他")}
@@ -548,4 +548,3 @@ function formatHours(ms: number): string {
   const hours = Math.max(0, Math.floor(ms / (1000 * 60 * 60)));
   return `${hours}時間`;
 }
-
