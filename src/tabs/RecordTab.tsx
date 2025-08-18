@@ -279,7 +279,7 @@ export default function RecordTab() {
 
   const Header = () => (
     <div className="sticky top-0 z-40 bg-white/90 backdrop-blur border-b">
-      {/* ▼ 外枠さらに広げ（スマホ）：px-0 / smは本文と揃えて px-8 */}
+      {/* 外枠：スマホ px-0 / sm 以上 px-8 */}
       <div className="mx-auto w-full max-w-none px-0 sm:px-8 py-2 flex items-center justify-end">
         <button
           type="button"
@@ -306,7 +306,6 @@ export default function RecordTab() {
         </button>
       </div>
 
-      {/* ▼ 日付行も同幅にあわせる */}
       <div className="mx-auto w-full max-w-none px-0 sm:px-8 pb-2">
         <div className="text-slate-700">{displayDate}</div>
       </div>
@@ -368,7 +367,7 @@ export default function RecordTab() {
   const renderCategory = (key: "upper" | "lower" | "etc", label: string) => {
     const items = exercises[key].filter((it) => it.enabled ?? true);
     return (
-      <Card className="mb-6 p-1 sm:p-5">{/* 内枠はOK（現状維持） */}
+      <Card className="mb-6 p-1 sm:p-5">
         <div className="mb-2 font-semibold">{label}</div>
 
         <div className="space-y-4">
@@ -379,6 +378,7 @@ export default function RecordTab() {
 
             const countsArr = padCounts(rec.counts?.[id], setCount);
             const checksArr = padChecks(rec.sets?.[id], setCount);
+            const arrLen = mode === "count" ? countsArr.length : checksArr.length;
 
             const times = rec.times?.[id] ?? [];
             const n = times.length;
@@ -392,10 +392,8 @@ export default function RecordTab() {
                 : undefined;
 
             return (
-              <div
-                key={id}
-                className="rounded-lg border border-slate-200 p-1 sm:p-4 overflow-hidden"
-              >
+              <div key={id} className="p-1 sm:p-4 overflow-hidden">
+                {/* ← 内枠の枠線・角丸は削除してスッキリ */}
                 <div className="text-sm text-slate-700 break-words font-medium">
                   {it.name}
                 </div>
@@ -405,17 +403,15 @@ export default function RecordTab() {
                   {intervalMs !== undefined ? formatHours(intervalMs) : "—"}
                 </div>
 
-                {/* 入力列：右寄せ・はみ出し防止 */}
-                {/* ▼ 親ラッパを flex 右寄せ（子のgridは既存のまま、ml-autoは削除） */}
+                {/* 入力列：右寄せ（実ボックス数ぶんだけ列を生成） */}
                 <div className="mt-2 w-full overflow-hidden pr-0 flex justify-end">
                   <div
                     className="
-                      grid shrink-0
-                      [grid-template-columns:repeat(5,50px)]
-                      gap-x-2 gap-y-3 auto-rows-[58px]
+                      inline-grid shrink-0
+                      gap-x-2 gap-y-3
                       justify-items-end content-start
-                      w-auto
                     "
+                    style={{ gridTemplateColumns: `repeat(${arrLen}, 50px)` }}
                   >
                     {mode === "count"
                       ? countsArr.map((val, idx) => {
@@ -532,7 +528,8 @@ export default function RecordTab() {
       >
         <Banner />
         <Header />
-        {/* ▼ 外枠の左右余白をさらに絞る（=実効表示幅を最大化） */}
+
+        {/* 外枠：スマホは左右余白ゼロ */}
         <div className="w-full max-w-none px-0 sm:px-8 py-4">
           {renderCategory("upper", "上半身")}
           {renderCategory("lower", "下半身")}
