@@ -1,4 +1,3 @@
-// src/tabs/RecordTab.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -239,7 +238,7 @@ export default function RecordTab() {
     </>
   );
 
-  /* ---------- 内部：カテゴリ描画（1行レイアウト） ---------- */
+  /* ---------- 内部：カテゴリ描画（“別行”版） ---------- */
   function renderCategory(category: Category, title: string) {
     const items = (exercises[category] ?? []).filter((it: any) => it.enabled !== false);
     const sorted = [...items.filter((it: any) => !doneIds.includes(it.id)), ...items.filter((it: any) => doneIds.includes(it.id))];
@@ -262,30 +261,25 @@ export default function RecordTab() {
 
             return (
               <div key={it.id} className="pb-4 border-b last:border-b-0">
-                {/* 行：左=種目名 / 右=インターバル表示＋入力域 */}
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <div className="font-medium break-words">{it.name}</div>
-                  </div>
+                {/* 1行目：種目名（フル幅） */}
+                <div className="font-medium break-words mb-2">{it.name}</div>
 
-                  <div className="shrink-0">
-                    <div className="text-xs text-slate-500 mb-2">前回からのインターバル：—</div>
+                {/* 2行目：インターバル表示（フル幅） */}
+                <div className="text-xs text-slate-500 mb-2">前回からのインターバル：—</div>
 
-                    {/* 入力域：回数 or チェック */}
-                    {isRepsMode(mode) ? (
-                      <RepSelects5PerRow
-                        rec={rec}
-                        id={it.id}
-                        setCount={setCount}
-                        target={repTarget}
-                        onChange={persist}
-                        markDone={markDone}
-                      />
-                    ) : (
-                      <Checks5PerRow rec={rec} id={it.id} setCount={setCount} onChange={persist} markDone={markDone} />
-                    )}
-                  </div>
-                </div>
+                {/* 3行目：入力域（回数 or チェック） */}
+                {isRepsMode(mode) ? (
+                  <RepSelects5PerRow
+                    rec={rec}
+                    id={it.id}
+                    setCount={setCount}
+                    target={repTarget}
+                    onChange={persist}
+                    markDone={markDone}
+                  />
+                ) : (
+                  <Checks5PerRow rec={rec} id={it.id} setCount={setCount} onChange={persist} markDone={markDone} />
+                )}
               </div>
             );
           })}
@@ -420,4 +414,3 @@ function Checks5PerRow({
     </div>
   );
 }
-
