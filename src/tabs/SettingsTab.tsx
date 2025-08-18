@@ -64,12 +64,14 @@ function toItemSafe(raw: any, fallbackCat: Category = "other"): ExtendedExercise
 }
 
 function groupForCompat(list: ExtendedExerciseItem[]) {
-  const g: Record<"upper"|"lower"|"other", any[]> = { upper: [], lower: [], other: [] };
+  type Cat3 = "upper" | "lower" | "other";
+  const g: Record<Cat3, any[]> = { upper: [], lower: [], other: [] };
   for (const it of list) {
-    g[it.category].push({
+    const key = (it.category === "etc" ? "other" : it.category) as Cat3;
+    g[key].push({
       id: it.id,
       name: it.name,
-      category: it.category,
+      category: key,
       enabled: it.enabled !== false,
       order: it.order ?? 0,
       inputMode: it.inputMode ?? "check",
