@@ -8,9 +8,6 @@ export default function Page() {
     <main className="mx-auto max-w-3xl p-4 md:p-6">
       <header className="mb-6">
         <h1 className="text-2xl font-bold">筋トレ記録アプリ</h1>
-        <p className="text-sm text-muted-foreground">
-          日々の筋トレの記録と管理
-        </p>
       </header>
 
       <RecordTab />
