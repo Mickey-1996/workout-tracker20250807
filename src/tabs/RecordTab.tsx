@@ -19,7 +19,9 @@ import type {
   Category,
 } from "@/lib/types";
 
-/* ---------- utils ---------- */
+/* ================== Utils ================== */
+const EXPORT_FILENAME = "workoutrecord.latest.json";
+
 const toYmd = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
     d.getDate()
@@ -41,33 +43,26 @@ const padChecks = (src: boolean[] | undefined, setCount: number) => {
   return base.slice(0, c);
 };
 
-function makeJSONBlob(data: unknown) {
-  return new Blob([JSON.stringify(data, null, 2)], {
-    type: "application/json",
-  });
-}
-function downloadJSON(filename: string, data: unknown) {
-  const blob = makeJSONBlob(data);
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
+const jsonString = (data: unknown) => JSON.stringify(data, null, 2);
+
 function hashString(s: string) {
   let h = 5381;
   for (let i = 0; i < s.length; i++) h = ((h << 5) + h) + s.charCodeAt(i);
   return (h >>> 0).toString(16);
 }
+
+/** localStorage の day:* を全取得（壊れた値は空オブジェクトで保持） */
 function collectAllDayRecords(): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
     if (k && k.startsWith("day:")) {
-      try { out[k] = JSON.parse(localStorage.getItem(k) || "{}"); } catch {}
+      try {
+        const v = localStorage.getItem(k);
+        out[k] = v ? JSON.parse(v) : {};
+      } catch {
+        out[k] = {};
+      }
     }
   }
   return out;
@@ -80,16 +75,20 @@ const calcRecordsSignature = () => {
     .join("|");
   return hashString(ordered);
 };
+
 const hasAnyData = (r?: Partial<DayRecord>) => {
   if (!r) return false;
-  if ((r.notesUpper ?? "") + (r.notesLower ?? "") + (r.notesEtc ?? "") !== "") return true;
+  if ((r.notesUpper ?? "") + (r.notesLower ?? "") + (r.notesEtc ?? "") !== "")
+    return true;
   if (r.sets && Object.values(r.sets).some((a) => a?.some(Boolean))) return true;
-  if (r.counts && Object.values(r.counts).some((a) => a?.some((n) => (n ?? 0) > 0))) return true;
+  if (r.counts && Object.values(r.counts).some((a) => a?.some((n) => (n ?? 0) > 0)))
+    return true;
   return false;
 };
 
-/* ---------- settings loader ---------- */
+/* -------- 設定ロード -------- */
 function loadExercises(): ExercisesGrouped {
+  // v2形式（settingsタブの最新仕様）
   const v2 = loadJSON<any>("wt:settings.v2");
   if (v2?.items && Array.isArray(v2.items)) {
     const grouped: ExercisesGrouped = { upper: [], lower: [], etc: [] };
@@ -122,6 +121,7 @@ function loadExercises(): ExercisesGrouped {
       grouped[k].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
     return grouped;
   }
+  // 旧形式フォールバック
   const raw = loadJSON<any>("exercises");
   if (raw?.upper || raw?.lower || raw?.etc)
     return { upper: raw.upper ?? [], lower: raw.lower ?? [], etc: raw.etc ?? [] };
@@ -131,19 +131,32 @@ function loadExercises(): ExercisesGrouped {
   return { upper: [], lower: [], etc: [] };
 }
 
-/* ---------- component ---------- */
+/* ================== Component ================== */
 export default function RecordTab() {
   const today = useMemo(() => new Date(), []);
   const todayStr = useMemo(() => toYmd(today), [today]);
   const displayDate = useMemo(
-    () => `${today.getFullYear()}年${String(today.getMonth() + 1).padStart(2, "0")}月${String(today.getDate()).padStart(2, "0")}日`,
+    () =>
+      `${today.getFullYear()}年${String(today.getMonth() + 1).padStart(
+        2,
+        "0"
+      )}月${String(today.getDate()).padStart(2, "0")}日`,
     [today]
   );
 
-  const [exercises, setExercises] = useState<ExercisesGrouped>({ upper: [], lower: [], etc: [] });
+  const [exercises, setExercises] = useState<ExercisesGrouped>({
+    upper: [],
+    lower: [],
+    etc: [],
+  });
   const [rec, setRec] = useState<DayRecord>({
-    date: todayStr, times: {}, sets: {}, counts: {},
-    notesUpper: "", notesLower: "", notesEtc: "",
+    date: todayStr,
+    times: {},
+    sets: {},
+    counts: {},
+    notesUpper: "",
+    notesLower: "",
+    notesEtc: "",
   });
 
   // 保存リマインド
@@ -152,15 +165,18 @@ export default function RecordTab() {
   const [currentSig, setCurrentSig] = useState<string>("");
 
   useEffect(() => {
-    try { setExercises(loadExercises()); } catch {}
+    try {
+      setExercises(loadExercises());
+    } catch {}
     try {
       const loaded = loadDayRecord(todayStr) as DayRecord | null | undefined;
-      if (loaded) setRec({
-        ...loaded,
-        notesUpper: loaded.notesUpper ?? "",
-        notesLower: loaded.notesLower ?? "",
-        notesEtc: loaded.notesEtc ?? "",
-      });
+      if (loaded)
+        setRec({
+          ...loaded,
+          notesUpper: loaded.notesUpper ?? "",
+          notesLower: loaded.notesLower ?? "",
+          notesEtc: loaded.notesEtc ?? "",
+        });
     } catch {}
     try {
       const t = Number(localStorage.getItem("wt:lastDiskSaveAt") || 0);
@@ -171,18 +187,26 @@ export default function RecordTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const hoursSinceSave = useMemo(() => !lastDiskSaveAt ? Infinity : (Date.now() - lastDiskSaveAt) / (1000 * 60 * 60), [lastDiskSaveAt]);
+  const hoursSinceSave = useMemo(
+    () => (!lastDiskSaveAt ? Infinity : (Date.now() - lastDiskSaveAt) / (1000 * 60 * 60)),
+    [lastDiskSaveAt]
+  );
   const shouldPromptSave = hoursSinceSave > 24 * 10;
-  const hasUnsavedChanges = currentSig !== "" && lastSavedSig !== "" && currentSig !== lastSavedSig;
+  const hasUnsavedChanges =
+    currentSig !== "" && lastSavedSig !== "" && currentSig !== lastSavedSig;
 
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
-      if (hasUnsavedChanges || shouldPromptSave) { e.preventDefault(); e.returnValue = ""; }
+      if (hasUnsavedChanges || shouldPromptSave) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
   }, [hasUnsavedChanges, shouldPromptSave]);
 
+  /** saveDayRecord の引数に合わせて正規化して保存 */
   const saveSafe = (date: string, data: DayRecord) => {
     const normalized: DayRecord = {
       date: data.date,
@@ -195,6 +219,7 @@ export default function RecordTab() {
     };
     saveDayRecord(date, normalized as Parameters<typeof saveDayRecord>[1]);
   };
+
   const persist = (next: DayRecord) => {
     const normalized: DayRecord = {
       date: next.date,
@@ -215,7 +240,7 @@ export default function RecordTab() {
     setCurrentSig(calcRecordsSignature());
   };
 
-  /* ---------- UI parts ---------- */
+  /* ================== UI Parts ================== */
   const Banner = () =>
     shouldPromptSave ? (
       <div className="fixed top-0 left-0 right-0 z-50 text-center text-[11px] sm:text-xs text-amber-700 bg-amber-50 border-b border-amber-200 py-1">
@@ -235,78 +260,106 @@ export default function RecordTab() {
           onClick={async () => {
             const payload = collectAllDayRecords();
 
-            // 1) iOS/Safari向け：共有経由でファイル保存（対応端末なら最も確実）
+            // 1) iOS Safari 等：Web Share Level 2（ファイル共有→「ファイルに保存」）
             try {
-              // @ts-ignore (Web Share Level 2)
+              // @ts-ignore
               if (navigator?.canShare && typeof File !== "undefined") {
-                const file = new File([makeJSONBlob(payload)], "workoutrecord.latest.json", {
-                  type: "application/json",
-                });
+                const file = new File(
+                  [new Blob([jsonString(payload)], { type: "application/json" })],
+                  EXPORT_FILENAME,
+                  { type: "application/json" }
+                );
                 // @ts-ignore
                 if (navigator.canShare({ files: [file] })) {
                   // @ts-ignore
-                  await navigator.share({ files: [file], title: "Workout Record", text: "記録データ" });
-                  throw new Error("__shared__"); // 成功→下の処理をスキップするためのダミー
+                  await navigator.share({
+                    files: [file],
+                    title: "Workout Record",
+                    text: "記録データ",
+                  });
+                  const sig = calcRecordsSignature();
+                  const t = Date.now();
+                  localStorage.setItem("wt:lastDiskSaveAt", String(t));
+                  localStorage.setItem("wt:lastSavedSig", sig);
+                  setLastDiskSaveAt(t);
+                  setLastSavedSig(sig);
+                  setCurrentSig(sig);
+                  alert(`保存しました（${EXPORT_FILENAME}）`);
+                  return;
                 }
               }
-            } catch (e: any) {
-              if (e?.message === "__shared__") {
-                // 共有成功→署名更新して終了
-                const sig = calcRecordsSignature();
-                const t = Date.now();
-                localStorage.setItem("wt:lastDiskSaveAt", String(t));
-                localStorage.setItem("wt:lastSavedSig", sig);
-                setLastDiskSaveAt(t); setLastSavedSig(sig); setCurrentSig(sig);
-                alert("保存しました（共有から保存）");
-                return;
-              }
+            } catch {
+              /* fallthrough */
             }
 
-            // 2) 通常ダウンロード
+            // 2) 通常のダウンロード（a[download] + Blob）
             try {
-              downloadJSON("workoutrecord.latest.json", payload);
-            } catch {}
+              const blob = new Blob([jsonString(payload)], {
+                type: "application/json",
+              });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = EXPORT_FILENAME;
+              document.body.appendChild(a);
+              a.click();
+              a.remove();
+              URL.revokeObjectURL(url);
+            } catch {
+              /* fallthrough */
+            }
 
-            // 3) 最終フォールバック：データURLを新規タブで開く（PWAでも共有→“ファイルに保存”が可能）
+            // 3) 最終フォールバック：data:URL を新規タブで開く（PWA等）
             try {
-              const dataUrl = "data:application/json;charset=utf-8," +
-                encodeURIComponent(JSON.stringify(payload, null, 2));
+              const dataUrl =
+                "data:application/json;charset=utf-8," +
+                encodeURIComponent(jsonString(payload));
               window.open(dataUrl, "_blank");
             } catch {}
 
+            // 署名・時刻の更新（いずれの経路でも）
             const sig = calcRecordsSignature();
             const t = Date.now();
             localStorage.setItem("wt:lastDiskSaveAt", String(t));
             localStorage.setItem("wt:lastSavedSig", sig);
-            setLastDiskSaveAt(t); setLastSavedSig(sig); setCurrentSig(sig);
-            alert(`保存しました（記録 ${Object.keys(payload).length} 件）`);
+            setLastDiskSaveAt(t);
+            setLastSavedSig(sig);
+            setCurrentSig(sig);
+            alert(`保存しました（${EXPORT_FILENAME}）`);
           }}
           aria-label="記録データを保存"
         >
           保存
         </button>
       </div>
+
       <div className="mx-auto w-full max-w-none px-3 sm:px-6 pb-2">
         <div className="text-slate-700">{displayDate}</div>
       </div>
     </div>
   );
 
-  // 正方形56px（iOSでの重なり防止：shrink-0＋明示サイズ）
+  // 56px 正方形：iOSの重なり回避（min-* + shrink-0 + block/relative + leading-none）
   const SquareCount = ({
-    value, onChange, max,
-  }: { value: number; onChange: (n: number) => void; max: number }) => (
-    <div className="w-14 h-14 min-w-[56px] min-h-[56px] shrink-0">
+    value,
+    onChange,
+    max,
+  }: {
+    value: number;
+    onChange: (n: number) => void;
+    max: number;
+  }) => (
+    <div className="w-14 h-14 min-w-[56px] min-h-[56px] shrink-0 relative block">
       <Select value={String(value)} onValueChange={(v) => onChange(Number(v))}>
-        <SelectTrigger className="h-14 w-14 p-0 text-lg justify-center">
+        <SelectTrigger className="h-14 w-14 p-0 text-lg justify-center leading-none box-border">
           <SelectValue placeholder="0" />
         </SelectTrigger>
-        {/* iPhoneでの選択しづらさ改善：下方向にポッパーで右寄せ・高z-index */}
+        {/* ドロップダウンは必ず下に出す／右寄せ・高z-index・スクロール可 */}
         <SelectContent
-          position="popper"
           side="bottom"
-          align="end"
-          className="z-[60] max-h-[60vh]"
+          align="start"
+          position="popper"
+          className="z-[60] max-h-[40vh] overflow-y-auto"
         >
           {Array.from({ length: Math.min(max, 15) + 1 }, (_, n) => n).map((n) => (
             <SelectItem key={n} value={String(n)}>
@@ -320,7 +373,7 @@ export default function RecordTab() {
 
   const SquareCheck = ({ on }: { on: boolean }) => (
     <div
-      className={`w-14 h-14 min-w-[56px] min-h-[56px] shrink-0 rounded-md border flex items-center justify-center ${
+      className={`w-14 h-14 min-w-[56px] min-h-[56px] shrink-0 relative block rounded-md border flex items-center justify-center ${
         on ? "bg-emerald-500 border-emerald-600 text-white" : "border-slate-300"
       }`}
     >
@@ -354,6 +407,7 @@ export default function RecordTab() {
             const countsArr = padCounts(rec.counts?.[id], setCount);
             const checksArr = padChecks(rec.sets?.[id], setCount);
 
+            // インターバル（最後と直前／なければ現在との差）
             const times = rec.times?.[id] ?? [];
             const n = times.length;
             const last = n ? new Date(times[n - 1]) : null;
@@ -378,9 +432,9 @@ export default function RecordTab() {
                   {intervalMs !== undefined ? formatHours(intervalMs) : "—"}
                 </div>
 
-                {/* 入力UI：w-fullで右端寄せ。iPhone重なり対策：固定行高56/ shrink-0 */}
+                {/* 入力UI：右端寄せ・折返し時も重ならない */}
                 <div className="mt-2 flex w-full">
-                  <div className="ml-auto grid grid-cols-5 gap-2 auto-rows-[56px] items-start justify-items-end">
+                  <div className="ml-auto grid grid-cols-5 gap-3 auto-rows-[60px] content-start justify-items-end w-[min(100%,336px)]">
                     {mode === "count"
                       ? countsArr.map((val, idx) => {
                           const update = (v: number) => {
@@ -443,6 +497,7 @@ export default function RecordTab() {
                               onClick={toggle}
                               aria-pressed={on}
                               aria-label="チェック"
+                              className="inline-block align-top"
                             >
                               <SquareCheck on={!!on} />
                             </button>
@@ -455,14 +510,17 @@ export default function RecordTab() {
           })}
         </div>
 
-        {/* メモ：幅広め（w-full） */}
+        {/* メモ（入力幅：w-full） */}
         <div className="mt-4">
           <div className="mb-1 text-xs text-slate-500">メモ（{label}）</div>
           <Textarea
             className="w-full"
             value={
-              key === "upper" ? rec.notesUpper :
-              key === "lower" ? rec.notesLower : rec.notesEtc
+              key === "upper"
+                ? rec.notesUpper
+                : key === "lower"
+                ? rec.notesLower
+                : rec.notesEtc
             }
             onChange={(e) => {
               const v = e.target.value;
@@ -485,7 +543,7 @@ export default function RecordTab() {
       <Banner />
       <div className={shouldPromptSave ? "pt-7 sm:pt-8" : ""}>
         <Header />
-        {/* 本文：横幅解放＋左右余白を少し増やす */}
+        {/* 本文：横幅解放＋左右余白 */}
         <div className="w-full max-w-none px-4 sm:px-6 py-4">
           {renderCategory("upper", "上半身")}
           {renderCategory("lower", "下半身")}
@@ -496,7 +554,7 @@ export default function RecordTab() {
   );
 }
 
-/* 時間表示（時間単位） */
+/* ===== インターバル時間（時間単位） ===== */
 function formatHours(ms: number): string {
   const hours = Math.max(0, Math.floor(ms / (1000 * 60 * 60)));
   return `${hours}時間`;
