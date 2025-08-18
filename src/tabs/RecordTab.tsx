@@ -94,7 +94,7 @@ const hasAnyData = (r?: Partial<DayRecord>) => {
   return false;
 };
 
-/** SettingsTab同等の保存 */
+/** SettingsTab同等の保存（ダウンロード） */
 function saveAsJsonLikeSettings(filename: string, data: unknown): boolean {
   const text = jsonString(data);
   try {
@@ -110,6 +110,13 @@ function saveAsJsonLikeSettings(filename: string, data: unknown): boolean {
       window.open(dataUrl, "_blank"); return true;
     } catch { return false; }
   }
+}
+
+/* ===== インターバル表示：時間（<1h は 0時間） ===== */
+function formatHours(ms: number): string {
+  if (!isFinite(ms) || ms <= 0) return "0時間";
+  const hours = Math.floor(ms / (1000 * 60 * 60));
+  return `${Math.max(0, hours)}時間`;
 }
 
 /* -------- 設定ロード -------- */
@@ -213,7 +220,6 @@ export default function RecordTab() {
     () => (!lastDiskSaveAt ? Infinity : (Date.now() - lastDiskSaveAt) / (1000 * 60 * 60)),
     [lastDiskSaveAt]
   );
-  // 初回保存前（0）は出さない
   const shouldPromptSave = lastDiskSaveAt > 0 && hoursSinceSave > 24 * 10;
   const hasUnsavedChanges =
     currentSig !== "" && lastSavedSig !== "" && currentSig !== lastSavedSig;
@@ -263,9 +269,27 @@ export default function RecordTab() {
     setCurrentSig(calcRecordsSignature());
   };
 
+  /* ------ 直近2回の時刻を“全日データ”から構築（currentSig依存） ------ */
+  const timesIndex = useMemo(() => {
+    const all = collectAllDayRecords();
+    const idx: Record<string, number[]> = {};
+    Object.values(all).forEach((v: any) => {
+      if (!isDayRecordObject(v)) return;
+      const tmap = (v?.times ?? {}) as Record<string, string[]>;
+      Object.entries(tmap).forEach(([exId, arr]) => {
+        if (!Array.isArray(arr)) return;
+        arr.forEach((iso) => {
+          const ts = Date.parse(String(iso));
+          if (Number.isFinite(ts)) (idx[exId] ??= []).push(ts);
+        });
+      });
+    });
+    Object.keys(idx).forEach((k) => idx[k].sort((a, b) => a - b));
+    return idx;
+  }, [currentSig]);
+
   /* ---------- UI ---------- */
 
-  // 10日以上未保存なら上部に出すバナー（ノッチ対応）
   const Banner = () =>
     shouldPromptSave ? (
       <div
@@ -279,18 +303,14 @@ export default function RecordTab() {
 
   const Header = () => (
     <div className="sticky top-0 z-40 bg-white/90 backdrop-blur border-b">
-      {/* 外枠：スマホ px-0 / sm 以上 px-8 */}
       <div className="mx-auto w-full max-w-none px-0 sm:px-8 py-2 flex items-center justify-end">
         <button
           type="button"
           className="rounded-md border px-3 py-1 text-sm hover:bg-slate-50"
           onClick={() => {
-            // 先に当日分を確実反映
             saveSafe(todayStr, rec);
-            // 全日分収集 → 保存
             const payload = collectAllDayRecords();
             const ok = saveAsJsonLikeSettings(EXPORT_FILENAME, payload);
-            // 署名・時刻更新
             const sig = calcRecordsSignature();
             const t = Date.now();
             localStorage.setItem("wt:lastDiskSaveAt", String(t));
@@ -327,16 +347,9 @@ export default function RecordTab() {
         <SelectTrigger className="h-[50px] w-[50px] p-0 text-lg justify-center leading-none box-border">
           <SelectValue placeholder="0" />
         </SelectTrigger>
-        <SelectContent
-          side="bottom"
-          align="start"
-          position="popper"
-          className="z-[60] max-h-[40vh] overflow-y-auto"
-        >
+        <SelectContent side="bottom" align="start" position="popper" className="z-[60] max-h-[40vh] overflow-y-auto">
           {Array.from({ length: Math.min(max, 15) + 1 }, (_, n) => n).map((n) => (
-            <SelectItem key={n} value={String(n)}>
-              {n}
-            </SelectItem>
+            <SelectItem key={n} value={String(n)}>{n}</SelectItem>
           ))}
         </SelectContent>
       </Select>
@@ -351,14 +364,7 @@ export default function RecordTab() {
     >
       {on ? (
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-          <path
-            d="M20 6L9 17l-5-5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="3"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
+          <path d="M20 6L9 17l-5-5" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       ) : null}
     </div>
@@ -380,37 +386,24 @@ export default function RecordTab() {
             const checksArr = padChecks(rec.sets?.[id], setCount);
             const arrLen = mode === "count" ? countsArr.length : checksArr.length;
 
-            const times = rec.times?.[id] ?? [];
-            const n = times.length;
-            const last = n ? new Date(times[n - 1]) : null;
-            const prev = n > 1 ? new Date(times[n - 2]) : null;
-            const intervalMs =
-              last && prev
-                ? last.getTime() - prev.getTime()
-                : last
-                ? Date.now() - last.getTime()
-                : undefined;
+            // 直近2回のタイムスタンプ（全日）→ 差分
+            const arr = timesIndex[id] ?? [];
+            let intervalMs: number | undefined;
+            if (arr.length >= 2) intervalMs = arr[arr.length - 1] - arr[arr.length - 2];
+            else if (arr.length === 1) intervalMs = Date.now() - arr[0];
 
             return (
               <div key={id} className="p-1 sm:p-4 overflow-hidden">
-                {/* ← 内枠の枠線・角丸は削除してスッキリ */}
-                <div className="text-sm text-slate-700 break-words font-medium">
-                  {it.name}
-                </div>
+                <div className="text-sm text-slate-700 break-words font-medium">{it.name}</div>
 
                 <div className="mt-2 text-xs text-slate-500 text-right">
-                  前回からのインターバル：
-                  {intervalMs !== undefined ? formatHours(intervalMs) : "—"}
+                  前回からのインターバル：{intervalMs !== undefined ? formatHours(intervalMs) : "0時間"}
                 </div>
 
                 {/* 入力列：右寄せ（実ボックス数ぶんだけ列を生成） */}
                 <div className="mt-2 w-full overflow-hidden pr-0 flex justify-end">
                   <div
-                    className="
-                      inline-grid shrink-0
-                      gap-x-2 gap-y-3
-                      justify-items-end content-start
-                    "
+                    className="inline-grid shrink-0 gap-x-2 gap-y-3 justify-items-end content-start"
                     style={{ gridTemplateColumns: `repeat(${arrLen}, 50px)` }}
                   >
                     {mode === "count"
@@ -433,14 +426,7 @@ export default function RecordTab() {
                             });
                           };
                           const max = Math.min(it.repTarget ?? 15, 15);
-                          return (
-                            <SquareCount
-                              key={`${id}-count-${idx}`}
-                              value={val}
-                              onChange={update}
-                              max={max}
-                            />
-                          );
+                          return <SquareCount key={`${id}-count-${idx}`} value={val} onChange={update} max={max} />;
                         })
                       : checksArr.map((on, idx) => {
                           const toggle = () => {
@@ -451,9 +437,7 @@ export default function RecordTab() {
                               nextChecks[idx] = nowOn;
 
                               const prevTimes = prev.times?.[id] ?? [];
-                              const nextTimes = nowOn
-                                ? [...prevTimes, new Date().toISOString()]
-                                : prevTimes;
+                              const nextTimes = nowOn ? [...prevTimes, new Date().toISOString()] : prevTimes;
 
                               const next: DayRecord = {
                                 ...prev,
@@ -464,7 +448,7 @@ export default function RecordTab() {
                                 notesEtc: prev.notesEtc ?? "",
                               };
                               saveSafe(todayStr, next);
-                              setCurrentSig(calcRecordsSignature());
+                              setCurrentSig(calcRecordsSignature()); // → timesIndex再構築
                               return next;
                             });
                           };
@@ -493,13 +477,7 @@ export default function RecordTab() {
           <div className="mb-1 text-xs text-slate-500">メモ（{label}）</div>
           <Textarea
             className="w-full"
-            value={
-              key === "upper"
-                ? rec.notesUpper
-                : key === "lower"
-                ? rec.notesLower
-                : rec.notesEtc
-            }
+            value={key === "upper" ? rec.notesUpper : key === "lower" ? rec.notesLower : rec.notesEtc}
             onChange={(e) => {
               const v = e.target.value;
               const next: DayRecord = {
@@ -520,15 +498,10 @@ export default function RecordTab() {
     <>
       <div
         className={shouldPromptSave ? "pt-7 sm:pt-8" : ""}
-        style={
-          shouldPromptSave
-            ? { paddingTop: "calc(env(safe-area-inset-top, 0px) + 2rem)" }
-            : undefined
-        }
+        style={shouldPromptSave ? { paddingTop: "calc(env(safe-area-inset-top, 0px) + 2rem)" } : undefined}
       >
         <Banner />
         <Header />
-
         {/* 外枠：スマホは左右余白ゼロ */}
         <div className="w-full max-w-none px-0 sm:px-8 py-4">
           {renderCategory("upper", "上半身")}
@@ -538,10 +511,4 @@ export default function RecordTab() {
       </div>
     </>
   );
-}
-
-/* ===== 時間表示（h単位） ===== */
-function formatHours(ms: number): string {
-  const hours = Math.max(0, Math.floor(ms / (1000 * 60 * 60)));
-  return `${hours}時間`;
 }
