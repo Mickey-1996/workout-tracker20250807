@@ -20,19 +20,6 @@ import type {
   Category,
 } from "@/lib/types";
 
-/* ===== 型（保存時に必須化） ===== */
-type DayRecordStrict = Omit<
-  DayRecord,
-  "notesUpper" | "notesLower" | "notesEtc" | "times" | "sets" | "counts"
-> & {
-  notesUpper: string;
-  notesLower: string;
-  notesEtc: string;
-  times: Record<string, string[]>;
-  sets: Record<string, boolean[]>;
-  counts: Record<string, number[]>;
-};
-
 /* ===== ユーティリティ ===== */
 const toYmd = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
@@ -181,9 +168,9 @@ export default function RecordTab() {
     return () => window.removeEventListener("beforeunload", handler);
   }, [hasUnsavedChanges, shouldPromptSave]);
 
-  /** 当日の記録を保存（型安全に正規化して保存） */
+  /** 当日の記録を保存（最初から DayRecord として正規化） */
   const persist = (next: DayRecord) => {
-    const normalized: DayRecordStrict = {
+    const normalized: DayRecord = {
       date: next.date,
       times: (next.times ?? {}) as Record<string, string[]>,
       sets: (next.sets ?? {}) as Record<string, boolean[]>,
@@ -198,7 +185,7 @@ export default function RecordTab() {
       return;
     }
     setRec(normalized);
-    saveDayRecord(todayStr, normalized as unknown as DayRecord); // 型満たす
+    saveDayRecord(todayStr, normalized);
     setCurrentSig(calcRecordsSignature());
   };
 
@@ -314,7 +301,6 @@ export default function RecordTab() {
                     {mode === "count"
                       ? countsArr.map((val, idx) => {
                           const update = (v: number) => {
-                            // 関数型更新 + 型安全な notes*
                             setRec((prev) => {
                               const prevCounts = padCounts(prev.counts?.[id], setCount);
                               const nextCounts = [...prevCounts];
@@ -337,7 +323,6 @@ export default function RecordTab() {
                         })
                       : checksArr.map((on, idx) => {
                           const toggle = () => {
-                            // 関数型更新 + 型安全な notes* ＆ タイムスタンプ追記
                             setRec((prev) => {
                               const prevChecks = padChecks(prev.sets?.[id], setCount);
                               const nowOn = !prevChecks[idx];
@@ -426,3 +411,4 @@ function formatHours(ms: number): string {
   const hours = Math.max(0, Math.floor(ms / (1000 * 60 * 60)));
   return `${hours}時間`;
 }
+
