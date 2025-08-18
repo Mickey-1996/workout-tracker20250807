@@ -181,7 +181,7 @@ export default function RecordTab() {
     return () => window.removeEventListener("beforeunload", handler);
   }, [hasUnsavedChanges, shouldPromptSave]);
 
-  /** 当日の記録を保存 */
+  /** 当日の記録を保存（型安全に正規化して保存） */
   const persist = (next: DayRecord) => {
     const normalized: DayRecordStrict = {
       date: next.date,
@@ -198,7 +198,7 @@ export default function RecordTab() {
       return;
     }
     setRec(normalized);
-    saveDayRecord(todayStr, normalized);
+    saveDayRecord(todayStr, normalized as unknown as DayRecord); // 型満たす
     setCurrentSig(calcRecordsSignature());
   };
 
@@ -314,6 +314,7 @@ export default function RecordTab() {
                     {mode === "count"
                       ? countsArr.map((val, idx) => {
                           const update = (v: number) => {
+                            // 関数型更新 + 型安全な notes*
                             setRec((prev) => {
                               const prevCounts = padCounts(prev.counts?.[id], setCount);
                               const nextCounts = [...prevCounts];
@@ -321,6 +322,9 @@ export default function RecordTab() {
                               const next: DayRecord = {
                                 ...prev,
                                 counts: { ...(prev.counts ?? {}), [id]: nextCounts },
+                                notesUpper: prev.notesUpper ?? "",
+                                notesLower: prev.notesLower ?? "",
+                                notesEtc:   prev.notesEtc   ?? "",
                               };
                               saveDayRecord(todayStr, next);
                               setCurrentSig(calcRecordsSignature());
@@ -333,13 +337,13 @@ export default function RecordTab() {
                         })
                       : checksArr.map((on, idx) => {
                           const toggle = () => {
+                            // 関数型更新 + 型安全な notes* ＆ タイムスタンプ追記
                             setRec((prev) => {
                               const prevChecks = padChecks(prev.sets?.[id], setCount);
                               const nowOn = !prevChecks[idx];
                               const nextChecks = [...prevChecks];
                               nextChecks[idx] = nowOn;
 
-                              // ON のときだけ時刻追加
                               const prevTimes = prev.times?.[id] ?? [];
                               const nextTimes = nowOn ? [...prevTimes, new Date().toISOString()] : prevTimes;
 
@@ -347,6 +351,9 @@ export default function RecordTab() {
                                 ...prev,
                                 sets:  { ...(prev.sets  ?? {}), [id]: nextChecks },
                                 times: { ...(prev.times ?? {}), [id]: nextTimes  },
+                                notesUpper: prev.notesUpper ?? "",
+                                notesLower: prev.notesLower ?? "",
+                                notesEtc:   prev.notesEtc   ?? "",
                               };
                               saveDayRecord(todayStr, next);
                               setCurrentSig(calcRecordsSignature());
@@ -383,7 +390,7 @@ export default function RecordTab() {
                 ...rec,
                 notesUpper: key === "upper" ? v : (rec.notesUpper ?? ""),
                 notesLower: key === "lower" ? v : (rec.notesLower ?? ""),
-                notesEtc: key === "etc" ? v : (rec.notesEtc ?? ""),
+                notesEtc:   key === "etc"   ? v : (rec.notesEtc   ?? ""),
               };
               persist(next);
             }}
