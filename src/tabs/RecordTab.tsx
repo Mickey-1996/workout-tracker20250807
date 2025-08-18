@@ -1,3 +1,4 @@
+```tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -264,8 +265,8 @@ export default function RecordTab() {
                 {/* 1行目：種目名（フル幅） */}
                 <div className="font-medium break-words mb-2">{it.name}</div>
 
-                {/* 2行目：インターバル表示（フル幅） */}
-                <div className="text-xs text-slate-500 mb-2">前回からのインターバル：—</div>
+                {/* 2行目：インターバル表示（右寄せ） */}
+                <div className="text-xs text-slate-500 mb-2 text-right">前回からのインターバル：—</div>
 
                 {/* 3行目：入力域（回数 or チェック） */}
                 {isRepsMode(mode) ? (
@@ -414,3 +415,4 @@ function Checks5PerRow({
     </div>
   );
 }
+```
