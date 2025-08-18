@@ -41,29 +41,23 @@ function toYmd(d: Date): string {
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
-
 function makeSetArray(n: number): number[] {
   const c = Math.max(1, Math.min(10, isFinite(n) ? Math.floor(n) : 3));
   return Array.from({ length: c }, (_, i) => i);
 }
-
-// iOS Safari 向け：JSONをダウンロード（通常は「ダウンロード」フォルダ）
 function downloadJSON(filename: string, data: unknown) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = filename; // ← 仕様：常に "workoutrecord.latest"
+  a.download = filename; // 仕様：常に "workoutrecord.latest"
   a.click();
   URL.revokeObjectURL(a.href);
 }
-
-// 軽量ハッシュ（保存漏れ検知）
 function hashString(s: string): string {
   let h = 5381;
   for (let i = 0; i < s.length; i++) h = ((h << 5) + h) + s.charCodeAt(i);
   return (h >>> 0).toString(16);
 }
-
 function collectAllDayRecords(): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (let i = 0; i < localStorage.length; i++) {
@@ -84,7 +78,6 @@ function calcRecordsSignature(): string {
     .join("|");
   return hashString(ordered);
 }
-
 function hasAnyData(r: DayRecord | DayRecordStrict | null | undefined) {
   if (!r) return false;
   const anySets = r.sets && Object.values(r.sets).some((arr) => (arr ?? []).some(Boolean));
@@ -95,13 +88,7 @@ function hasAnyData(r: DayRecord | DayRecordStrict | null | undefined) {
 }
 
 /* --- 設定ロード --- */
-/** 可能な設定ソース:
- *  1) wt:settings.v2 ... { items: [{ id, name, category, enabled, mode/inputMode, sets/checkCount, repTarget, order }] }
- *  2) exercises      ... { upper/lower/etc: [{...}] }
- *  3) wt:settings    ... { upper/lower/etc: [{...}] } ← レガシー
- */
 function loadExercises(): ExercisesGrouped {
-  // v2（新フォーマット）
   const v2 = loadJSON<any>("wt:settings.v2");
   if (v2?.items && Array.isArray(v2.items)) {
     const grouped: ExercisesGrouped = { upper: [], lower: [], etc: [] };
@@ -127,55 +114,15 @@ function loadExercises(): ExercisesGrouped {
     }
     return grouped;
   }
-
-  // 旧: exercises
   const raw = loadJSON<any>("exercises");
-  const groupedFromRaw = normalizeLegacyGrouped(raw);
-  if (groupedFromRaw) return groupedFromRaw;
-
-  // 旧: wt:settings
+  if (raw?.upper || raw?.lower || raw?.etc) {
+    return { upper: raw.upper ?? [], lower: raw.lower ?? [], etc: raw.etc ?? [] };
+  }
   const legacy = loadJSON<any>("wt:settings");
-  const groupedFromLegacy = normalizeLegacyGrouped(legacy);
-  if (groupedFromLegacy) return groupedFromLegacy;
-
-  // どれも無ければ空
+  if (legacy?.upper || legacy?.lower || legacy?.etc) {
+    return { upper: legacy.upper ?? [], lower: legacy.lower ?? [], etc: legacy.etc ?? [] };
+  }
   return { upper: [], lower: [], etc: [] };
-}
-
-/** legacy/exercises, legacy/wt:settings を {upper,lower,etc} に正規化 */
-function normalizeLegacyGrouped(src: any): ExercisesGrouped | null {
-  if (!src) return null;
-  const norm = (arr?: any[]) =>
-    Array.isArray(arr)
-      ? arr.map((it: any) => ({
-          id: String(it.id ?? ""),
-          name: String(it.name ?? ""),
-          category: (it.category ?? "etc") as Category,
-          enabled: Boolean(it.enabled ?? true),
-          mode: (it.mode ?? it.inputMode ?? "check") as InputMode,
-          inputMode: (it.inputMode ?? it.mode) as InputMode | undefined,
-          sets: Number(it.sets ?? it.checkCount ?? 3),
-          checkCount: it.checkCount,
-          repTarget: it.repTarget,
-          order: Number(it.order ?? 1),
-        }))
-      : [];
-  const grouped: ExercisesGrouped = {
-    upper: norm(src.upper),
-    lower: norm(src.lower),
-    etc: norm(src.etc),
-  };
-  if (
-    grouped.upper.length === 0 &&
-    grouped.lower.length === 0 &&
-    grouped.etc.length === 0
-  ) {
-    return null;
-  }
-  for (const k of ["upper", "lower", "etc"] as const) {
-    grouped[k].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-  }
-  return grouped;
 }
 
 /* --- 本体 --- */
@@ -188,48 +135,29 @@ export default function RecordTab() {
   );
 
   const [exercises, setExercises] = useState<ExercisesGrouped>({ upper: [], lower: [], etc: [] });
-
   const [rec, setRec] = useState<DayRecord>({
-    date: todayStr,
-    times: {},
-    sets: {},
-    counts: {},
-    notesUpper: "",
-    notesLower: "",
-    notesEtc: "",
+    date: todayStr, times: {}, sets: {}, counts: {},
+    notesUpper: "", notesLower: "", notesEtc: "",
   });
 
-  // ディスク保存の最終時刻／シグネチャ（未保存検知）
   const [lastDiskSaveAt, setLastDiskSaveAt] = useState<number>(0);
   const [lastSavedSig, setLastSavedSig] = useState<string>("");
   const [currentSig, setCurrentSig] = useState<string>("");
 
   useEffect(() => {
     try { setExercises(loadExercises()); } catch {}
-
     try {
       const loaded = loadDayRecord(todayStr) as DayRecord | null | undefined;
-      if (loaded) {
-        setRec({
-          ...loaded,
-          notesUpper: loaded.notesUpper ?? "",
-          notesLower: loaded.notesLower ?? "",
-          notesEtc: loaded.notesEtc ?? "",
-          ...(loaded as any).notesOther !== undefined ? { notesOther: (loaded as any).notesOther } : {},
-        });
-      }
+      if (loaded) setRec({ ...loaded, notesUpper: loaded.notesUpper ?? "", notesLower: loaded.notesLower ?? "", notesEtc: loaded.notesEtc ?? "" });
     } catch {}
-
     try {
       const t = Number(localStorage.getItem("wt:lastDiskSaveAt") || 0);
       setLastDiskSaveAt(t);
       setLastSavedSig(localStorage.getItem("wt:lastSavedSig") ?? "");
       setCurrentSig(calcRecordsSignature());
     } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* --- 10日未保存フラグ --- */
   const hoursSinceSave = useMemo(() => {
     if (!lastDiskSaveAt) return Infinity;
     return (Date.now() - lastDiskSaveAt) / (1000 * 60 * 60);
@@ -237,47 +165,34 @@ export default function RecordTab() {
   const shouldPromptSave = hoursSinceSave > 24 * 10;
   const hasUnsavedChanges = currentSig !== "" && lastSavedSig !== "" && currentSig !== lastSavedSig;
 
-  // 離脱警告（保存漏れ抑止）
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
-      if (hasUnsavedChanges || shouldPromptSave) {
-        e.preventDefault();
-        e.returnValue = "";
-      }
+      if (hasUnsavedChanges || shouldPromptSave) { e.preventDefault(); e.returnValue = ""; }
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
   }, [hasUnsavedChanges, shouldPromptSave]);
 
-  // 保存ヘルパー（空上書き防止）
   const persist = (next: DayRecord) => {
-    const normalized: DayRecord = {
-      ...next,
+    const normalized: DayRecordStrict = {
+      date: next.date,
+      times: (next.times ?? {}) as Record<string, string[]>,
+      sets: (next.sets ?? {}) as Record<string, boolean[]>,
+      counts: (next.counts ?? {}) as Record<string, number[]>,
       notesUpper: next.notesUpper ?? "",
       notesLower: next.notesLower ?? "",
       notesEtc: next.notesEtc ?? "",
-      ...(next as any).notesOther !== undefined ? { notesOther: (next as any).notesOther } : {},
-    };
-    const normalizedStrict: DayRecordStrict = {
-      date: normalized.date,
-      times: (normalized.times ?? {}) as Record<string, string[]>,
-      sets: (normalized.sets ?? {}) as Record<string, boolean[]>,
-      counts: (normalized.counts ?? {}) as Record<string, number[]>,
-      notesUpper: normalized.notesUpper ?? "",
-      notesLower: normalized.notesLower ?? "",
-      notesEtc: normalized.notesEtc ?? "",
     };
     const current = loadDayRecord(todayStr) as DayRecord | null | undefined;
-    if (!hasAnyData(normalizedStrict) && hasAnyData(current ?? undefined)) {
+    if (!hasAnyData(normalized) && hasAnyData(current ?? undefined)) {
       if (current) setRec(current);
       return;
     }
-    setRec(normalizedStrict);
-    saveDayRecord(todayStr, normalizedStrict);
+    setRec(normalized);
+    saveDayRecord(todayStr, normalized);
     setCurrentSig(calcRecordsSignature());
   };
 
-  // 完了時刻の更新
   const markDone = (id: string) => {
     const iso = new Date().toISOString();
     persist({
@@ -286,28 +201,19 @@ export default function RecordTab() {
     });
   };
 
-  /* ---- UI: レイアウト安定化 ---- */
+  /* ===== UI ===== */
 
-  // バナーのスロット：表示の有無で高さが変わらないように常に枠を確保
-  const BannerSlot = () => (
-    <div className="sticky top-0 z-50">
-      <div className="h-7 sm:h-8 bg-transparent">
-        {shouldPromptSave && (
-          <div
-            className="absolute inset-x-0 top-0 text-center text-[11px] sm:text-xs text-amber-700 bg-amber-50 border-b border-amber-200 py-1"
-            role="status"
-            aria-live="polite"
-          >
-            10日以上保存していません。右上の「保存」を押してください。
-          </div>
-        )}
+  // 画面最上部に固定バナー（※「ディスクに」は含めない）
+  const Banner = () =>
+    shouldPromptSave ? (
+      <div className="fixed top-0 left-0 right-0 z-50 text-center text-[11px] sm:text-xs text-amber-700 bg-amber-50 border-b border-amber-200 py-1">
+        10日以上保存していません。右上の「保存」を押してください。
       </div>
-    </div>
-  );
+    ) : null;
 
-  // ヘッダー：sticky（上部固定）、上段＝保存ボタン（右）、下段＝日付（左）
+  // 保存ボタン＋日付（ヘッダー）
   const Header = () => (
-    <div className="sticky top-7 sm:top-8 z-40 bg-white/90 backdrop-blur border-b">
+    <div className="sticky top-0 z-40 bg-white/90 backdrop-blur border-b">
       <div className="mx-auto max-w-3xl px-4 sm:px-6 py-2 flex items-center justify-end">
         {hasUnsavedChanges && <span className="mr-3 text-xs text-rose-600">未保存の変更があります</span>}
         <button
@@ -315,16 +221,14 @@ export default function RecordTab() {
           className="rounded-md border px-3 py-1 text-sm hover:bg-slate-50"
           onClick={() => {
             const payload = collectAllDayRecords();
-            downloadJSON("workoutrecord.latest", payload); // 仕様どおりの固定名
+            downloadJSON("workoutrecord.latest", payload);
             const sig = calcRecordsSignature();
             const t = Date.now();
             localStorage.setItem("wt:lastDiskSaveAt", String(t));
             localStorage.setItem("wt:lastSavedSig", sig);
-            setLastDiskSaveAt(t);
-            setLastSavedSig(sig);
-            setCurrentSig(sig);
+            setLastDiskSaveAt(t); setLastSavedSig(sig); setCurrentSig(sig);
           }}
-          aria-label="記録データを端末に保存"
+          aria-label="記録データを保存"
         >
           保存
         </button>
@@ -346,31 +250,42 @@ export default function RecordTab() {
             const mode = (it.mode ?? it.inputMode ?? "check") as InputMode;
             const setCount = it.sets ?? it.checkCount ?? 3;
 
-            // 1行目：種目名 + 入力UI（グリッドで安定配置）
-            const row1 = (
-              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
-                {/* 種目名（折返し可） */}
-                <div className="sm:col-span-4 text-sm text-slate-700 break-words">
+            // インターバル計算
+            const times = rec.times?.[id] ?? [];
+            const n = times.length;
+            const last = n ? new Date(times[n - 1]) : null;
+            const prev = n > 1 ? new Date(times[n - 2]) : null;
+            const intervalMs =
+              last && prev ? last.getTime() - prev.getTime() : last ? Date.now() - last.getTime() : undefined;
+
+            return (
+              <div key={id} className="rounded-lg border border-slate-200 p-3">
+                {/* 1行目：種目名 */}
+                <div className="text-sm text-slate-700 break-words font-medium">
                   {it.name}
                 </div>
 
-                {/* 入力UI（5個で改行に統一） */}
-                <div className="sm:col-span-8">
+                {/* 2行目：インターバル（単独行） */}
+                <div className="mt-2 text-xs text-slate-500">
+                  前回からのインターバル：{intervalMs !== undefined ? formatDuration(intervalMs) : "—"}
+                </div>
+
+                {/* 3行目：入力UI（チェック／回数とも5列で折返し。セット番号は表示しない） */}
+                <div className="mt-2">
                   {mode === "count" ? (
                     <div className="grid grid-cols-5 gap-2">
                       {(rec.counts?.[id] ?? Array.from({ length: setCount }, () => 0)).map((val, idx) => {
                         const update = (v: number) => {
-                          const prev = rec.counts?.[id] ?? Array.from({ length: setCount }, () => 0);
-                          const nextCounts = [...prev];
-                          nextCounts[idx] = v;
-                          persist({ ...rec, counts: { ...(rec.counts ?? {}), [id]: nextCounts } });
+                          const prevCounts = rec.counts?.[id] ?? Array.from({ length: setCount }, () => 0);
+                          const next = [...prevCounts];
+                          next[idx] = v;
+                          persist({ ...rec, counts: { ...(rec.counts ?? {}), [id]: next } });
                         };
                         const max = it.repTarget ?? 20;
                         return (
-                          <div key={idx} className="flex items-center gap-1 h-8">
-                            <span className="text-xs text-slate-500">S{idx + 1}</span>
+                          <div key={idx} className="h-8">
                             <Select value={String(val)} onValueChange={(v) => update(Number(v))}>
-                              <SelectTrigger className="h-8 w-20">
+                              <SelectTrigger className="h-8 w-16">
                                 <SelectValue placeholder="0" />
                               </SelectTrigger>
                               <SelectContent>
@@ -395,13 +310,13 @@ export default function RecordTab() {
                           if (nextChecks[idx]) markDone(id);
                         };
                         return (
-                          <label
+                          <button
                             key={idx}
-                            className="flex items-center gap-2 rounded-md border px-2 py-1 h-8"
-                          >
-                            <Checkbox checked={!!checks[idx]} onCheckedChange={toggle} />
-                            <span className="text-xs text-slate-600">S{idx + 1}</span>
-                          </label>
+                            type="button"
+                            onClick={toggle}
+                            className={`w-8 h-8 rounded-md border ${checks[idx] ? "bg-emerald-500 border-emerald-600 text-white" : "border-slate-300"}`}
+                            aria-label={`チェック`}
+                          />
                         );
                       })}
                     </div>
@@ -409,32 +324,10 @@ export default function RecordTab() {
                 </div>
               </div>
             );
-
-            // 2行目：インターバル（折返し前提・横揺れなし）
-            const times = rec.times?.[id] ?? [];
-            const n = times.length;
-            const last = n ? new Date(times[n - 1]) : null;
-            const prev = n > 1 ? new Date(times[n - 2]) : null;
-            const intervalMs =
-              last && prev ? last.getTime() - prev.getTime() : last ? Date.now() - last.getTime() : undefined;
-
-            const row2 = (
-              <div className="mt-1 text-xs text-slate-500">
-                前回から：{intervalMs !== undefined ? formatDuration(intervalMs) : "—"}{" "}
-                {last && <span className="ml-3">最終：{last.toLocaleTimeString()}</span>}
-              </div>
-            );
-
-            return (
-              <div key={id} className="rounded-lg border border-slate-200 p-3">
-                {row1}
-                {row2}
-              </div>
-            );
           })}
         </div>
 
-        {/* カテゴリメモ（placeholderは指定しない＝空欄） */}
+        {/* カテゴリメモ */}
         <div className="mt-4">
           <div className="mb-1 text-xs text-slate-500">メモ（{label}）</div>
           <Textarea
@@ -451,30 +344,26 @@ export default function RecordTab() {
             }}
           />
         </div>
-
-        {/* 種目が0件のときの小さな案内（UIは維持） */}
-        {exercises[key].filter((it) => it.enabled ?? true).length === 0 && (
-          <div className="mt-2 text-[11px] text-slate-400">
-            種目が未登録です。設定画面で種目を追加するとここに表示されます。
-          </div>
-        )}
       </Card>
     );
   };
 
   return (
     <>
-      {/* 1) バナーのためのスロット（高さを常時確保） */}
-      <BannerSlot />
+      {/* 最上部バナー（固定） */}
+      <Banner />
 
-      {/* 2) 上部ヘッダー（保存ボタン／日付） */}
-      <Header />
+      {/* バナーがある場合は上に余白を追加して重なり防止 */}
+      <div className={shouldPromptSave ? "pt-7 sm:pt-8" : ""}>
+        {/* 上部ヘッダー */}
+        <Header />
 
-      {/* 3) 本文 */}
-      <div className="mx-auto max-w-3xl px-4 sm:px-6 py-4">
-        {renderCategory("upper", "上半身")}
-        {renderCategory("lower", "下半身")}
-        {renderCategory("etc", "その他")}
+        {/* 本文 */}
+        <div className="mx-auto max-w-3xl px-4 sm:px-6 py-4">
+          {renderCategory("upper", "上半身")}
+          {renderCategory("lower", "下半身")}
+          {renderCategory("etc", "その他")}
+        </div>
       </div>
     </>
   );
@@ -488,3 +377,4 @@ function formatDuration(ms: number): string {
   const sec = s % 60;
   return h > 0 ? `${h}時間${m}分${sec}秒` : m > 0 ? `${m}分${sec}秒` : `${sec}秒`;
 }
+
