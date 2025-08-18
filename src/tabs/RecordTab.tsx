@@ -19,7 +19,7 @@ import type {
   Category,
 } from "@/lib/types";
 
-/* ===== ユーティリティ ===== */
+/* ---------- utils ---------- */
 const toYmd = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
     d.getDate()
@@ -41,14 +41,17 @@ const padChecks = (src: boolean[] | undefined, setCount: number) => {
   return base.slice(0, c);
 };
 
-function downloadJSON(filename: string, data: unknown) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], {
+function makeJSONBlob(data: unknown) {
+  return new Blob([JSON.stringify(data, null, 2)], {
     type: "application/json",
   });
+}
+function downloadJSON(filename: string, data: unknown) {
+  const blob = makeJSONBlob(data);
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = filename; // e.g. workoutrecord.latest.json
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -59,15 +62,12 @@ function hashString(s: string) {
   for (let i = 0; i < s.length; i++) h = ((h << 5) + h) + s.charCodeAt(i);
   return (h >>> 0).toString(16);
 }
-/** localStorage の day:* を全部集める（保存用） */
 function collectAllDayRecords(): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
     if (k && k.startsWith("day:")) {
-      try {
-        out[k] = JSON.parse(localStorage.getItem(k) || "{}");
-      } catch {}
+      try { out[k] = JSON.parse(localStorage.getItem(k) || "{}"); } catch {}
     }
   }
   return out;
@@ -80,18 +80,15 @@ const calcRecordsSignature = () => {
     .join("|");
   return hashString(ordered);
 };
-
 const hasAnyData = (r?: Partial<DayRecord>) => {
   if (!r) return false;
-  if ((r.notesUpper ?? "") + (r.notesLower ?? "") + (r.notesEtc ?? "") !== "")
-    return true;
+  if ((r.notesUpper ?? "") + (r.notesLower ?? "") + (r.notesEtc ?? "") !== "") return true;
   if (r.sets && Object.values(r.sets).some((a) => a?.some(Boolean))) return true;
-  if (r.counts && Object.values(r.counts).some((a) => a?.some((n) => (n ?? 0) > 0)))
-    return true;
+  if (r.counts && Object.values(r.counts).some((a) => a?.some((n) => (n ?? 0) > 0))) return true;
   return false;
 };
 
-/* ===== 設定ロード ===== */
+/* ---------- settings loader ---------- */
 function loadExercises(): ExercisesGrouped {
   const v2 = loadJSON<any>("wt:settings.v2");
   if (v2?.items && Array.isArray(v2.items)) {
@@ -130,40 +127,23 @@ function loadExercises(): ExercisesGrouped {
     return { upper: raw.upper ?? [], lower: raw.lower ?? [], etc: raw.etc ?? [] };
   const legacy = loadJSON<any>("wt:settings");
   if (legacy?.upper || legacy?.lower || legacy?.etc)
-    return {
-      upper: legacy.upper ?? [],
-      lower: legacy.lower ?? [],
-      etc: legacy.etc ?? [],
-    };
+    return { upper: legacy.upper ?? [], lower: legacy.lower ?? [], etc: legacy.etc ?? [] };
   return { upper: [], lower: [], etc: [] };
 }
 
-/* ===== 本体 ===== */
+/* ---------- component ---------- */
 export default function RecordTab() {
   const today = useMemo(() => new Date(), []);
   const todayStr = useMemo(() => toYmd(today), [today]);
   const displayDate = useMemo(
-    () =>
-      `${today.getFullYear()}年${String(today.getMonth() + 1).padStart(
-        2,
-        "0"
-      )}月${String(today.getDate()).padStart(2, "0")}日`,
+    () => `${today.getFullYear()}年${String(today.getMonth() + 1).padStart(2, "0")}月${String(today.getDate()).padStart(2, "0")}日`,
     [today]
   );
 
-  const [exercises, setExercises] = useState<ExercisesGrouped>({
-    upper: [],
-    lower: [],
-    etc: [],
-  });
+  const [exercises, setExercises] = useState<ExercisesGrouped>({ upper: [], lower: [], etc: [] });
   const [rec, setRec] = useState<DayRecord>({
-    date: todayStr,
-    times: {},
-    sets: {},
-    counts: {},
-    notesUpper: "",
-    notesLower: "",
-    notesEtc: "",
+    date: todayStr, times: {}, sets: {}, counts: {},
+    notesUpper: "", notesLower: "", notesEtc: "",
   });
 
   // 保存リマインド
@@ -172,18 +152,15 @@ export default function RecordTab() {
   const [currentSig, setCurrentSig] = useState<string>("");
 
   useEffect(() => {
-    try {
-      setExercises(loadExercises());
-    } catch {}
+    try { setExercises(loadExercises()); } catch {}
     try {
       const loaded = loadDayRecord(todayStr) as DayRecord | null | undefined;
-      if (loaded)
-        setRec({
-          ...loaded,
-          notesUpper: loaded.notesUpper ?? "",
-          notesLower: loaded.notesLower ?? "",
-          notesEtc: loaded.notesEtc ?? "",
-        });
+      if (loaded) setRec({
+        ...loaded,
+        notesUpper: loaded.notesUpper ?? "",
+        notesLower: loaded.notesLower ?? "",
+        notesEtc: loaded.notesEtc ?? "",
+      });
     } catch {}
     try {
       const t = Number(localStorage.getItem("wt:lastDiskSaveAt") || 0);
@@ -194,26 +171,18 @@ export default function RecordTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const hoursSinceSave = useMemo(() => {
-    if (!lastDiskSaveAt) return Infinity;
-    return (Date.now() - lastDiskSaveAt) / (1000 * 60 * 60);
-  }, [lastDiskSaveAt]);
+  const hoursSinceSave = useMemo(() => !lastDiskSaveAt ? Infinity : (Date.now() - lastDiskSaveAt) / (1000 * 60 * 60), [lastDiskSaveAt]);
   const shouldPromptSave = hoursSinceSave > 24 * 10;
-  const hasUnsavedChanges =
-    currentSig !== "" && lastSavedSig !== "" && currentSig !== lastSavedSig;
+  const hasUnsavedChanges = currentSig !== "" && lastSavedSig !== "" && currentSig !== lastSavedSig;
 
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
-      if (hasUnsavedChanges || shouldPromptSave) {
-        e.preventDefault();
-        e.returnValue = "";
-      }
+      if (hasUnsavedChanges || shouldPromptSave) { e.preventDefault(); e.returnValue = ""; }
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
   }, [hasUnsavedChanges, shouldPromptSave]);
 
-  /** saveDayRecord の受け取り型に合わせて安全に保存 */
   const saveSafe = (date: string, data: DayRecord) => {
     const normalized: DayRecord = {
       date: data.date,
@@ -226,8 +195,6 @@ export default function RecordTab() {
     };
     saveDayRecord(date, normalized as Parameters<typeof saveDayRecord>[1]);
   };
-
-  /** 当日の記録を保存（最初から DayRecord として正規化） */
   const persist = (next: DayRecord) => {
     const normalized: DayRecord = {
       date: next.date,
@@ -248,7 +215,7 @@ export default function RecordTab() {
     setCurrentSig(calcRecordsSignature());
   };
 
-  /* ===== UI ===== */
+  /* ---------- UI parts ---------- */
   const Banner = () =>
     shouldPromptSave ? (
       <div className="fixed top-0 left-0 right-0 z-50 text-center text-[11px] sm:text-xs text-amber-700 bg-amber-50 border-b border-amber-200 py-1">
@@ -265,23 +232,53 @@ export default function RecordTab() {
         <button
           type="button"
           className="rounded-md border px-3 py-1 text-sm hover:bg-slate-50"
-          onClick={() => {
+          onClick={async () => {
             const payload = collectAllDayRecords();
+
+            // 1) iOS/Safari向け：共有経由でファイル保存（対応端末なら最も確実）
+            try {
+              // @ts-ignore (Web Share Level 2)
+              if (navigator?.canShare && typeof File !== "undefined") {
+                const file = new File([makeJSONBlob(payload)], "workoutrecord.latest.json", {
+                  type: "application/json",
+                });
+                // @ts-ignore
+                if (navigator.canShare({ files: [file] })) {
+                  // @ts-ignore
+                  await navigator.share({ files: [file], title: "Workout Record", text: "記録データ" });
+                  throw new Error("__shared__"); // 成功→下の処理をスキップするためのダミー
+                }
+              }
+            } catch (e: any) {
+              if (e?.message === "__shared__") {
+                // 共有成功→署名更新して終了
+                const sig = calcRecordsSignature();
+                const t = Date.now();
+                localStorage.setItem("wt:lastDiskSaveAt", String(t));
+                localStorage.setItem("wt:lastSavedSig", sig);
+                setLastDiskSaveAt(t); setLastSavedSig(sig); setCurrentSig(sig);
+                alert("保存しました（共有から保存）");
+                return;
+              }
+            }
+
+            // 2) 通常ダウンロード
             try {
               downloadJSON("workoutrecord.latest.json", payload);
-            } catch {
-              const dataUrl =
-                "data:application/json;charset=utf-8," +
+            } catch {}
+
+            // 3) 最終フォールバック：データURLを新規タブで開く（PWAでも共有→“ファイルに保存”が可能）
+            try {
+              const dataUrl = "data:application/json;charset=utf-8," +
                 encodeURIComponent(JSON.stringify(payload, null, 2));
-              window.open(dataUrl, "_blank"); // iOS PWA フォールバック
-            }
+              window.open(dataUrl, "_blank");
+            } catch {}
+
             const sig = calcRecordsSignature();
             const t = Date.now();
             localStorage.setItem("wt:lastDiskSaveAt", String(t));
             localStorage.setItem("wt:lastSavedSig", sig);
-            setLastDiskSaveAt(t);
-            setLastSavedSig(sig);
-            setCurrentSig(sig);
+            setLastDiskSaveAt(t); setLastSavedSig(sig); setCurrentSig(sig);
             alert(`保存しました（記録 ${Object.keys(payload).length} 件）`);
           }}
           aria-label="記録データを保存"
@@ -295,29 +292,27 @@ export default function RecordTab() {
     </div>
   );
 
-  // 正方形56pxのセレクト/チェック（数値は最大15）
+  // 正方形56px（iOSでの重なり防止：shrink-0＋明示サイズ）
   const SquareCount = ({
-    value,
-    onChange,
-    max,
-  }: {
-    value: number;
-    onChange: (n: number) => void;
-    max: number;
-  }) => (
-    <div className="w-14 h-14 shrink-0">
+    value, onChange, max,
+  }: { value: number; onChange: (n: number) => void; max: number }) => (
+    <div className="w-14 h-14 min-w-[56px] min-h-[56px] shrink-0">
       <Select value={String(value)} onValueChange={(v) => onChange(Number(v))}>
         <SelectTrigger className="h-14 w-14 p-0 text-lg justify-center">
           <SelectValue placeholder="0" />
         </SelectTrigger>
-        <SelectContent>
-          {Array.from({ length: Math.min(max, 15) + 1 }, (_, n) => n).map(
-            (n) => (
-              <SelectItem key={n} value={String(n)}>
-                {n}
-              </SelectItem>
-            )
-          )}
+        {/* iPhoneでの選択しづらさ改善：下方向にポッパーで右寄せ・高z-index */}
+        <SelectContent
+          position="popper"
+          side="bottom"
+          align="end"
+          className="z-[60] max-h-[60vh]"
+        >
+          {Array.from({ length: Math.min(max, 15) + 1 }, (_, n) => n).map((n) => (
+            <SelectItem key={n} value={String(n)}>
+              {n}
+            </SelectItem>
+          ))}
         </SelectContent>
       </Select>
     </div>
@@ -325,7 +320,7 @@ export default function RecordTab() {
 
   const SquareCheck = ({ on }: { on: boolean }) => (
     <div
-      className={`w-14 h-14 shrink-0 rounded-md border flex items-center justify-center ${
+      className={`w-14 h-14 min-w-[56px] min-h-[56px] shrink-0 rounded-md border flex items-center justify-center ${
         on ? "bg-emerald-500 border-emerald-600 text-white" : "border-slate-300"
       }`}
     >
@@ -347,7 +342,7 @@ export default function RecordTab() {
   const renderCategory = (key: "upper" | "lower" | "etc", label: string) => {
     const items = exercises[key].filter((it) => it.enabled ?? true);
     return (
-      <Card className="mb-6 p-4">
+      <Card className="mb-6 p-3 sm:p-5">
         <div className="mb-2 font-semibold">{label}</div>
 
         <div className="space-y-4">
@@ -356,11 +351,9 @@ export default function RecordTab() {
             const mode = (it.mode ?? it.inputMode ?? "check") as InputMode;
             const setCount = clampSets(it.sets ?? it.checkCount ?? 3);
 
-            // 表示配列（必ず setCount 個）
             const countsArr = padCounts(rec.counts?.[id], setCount);
             const checksArr = padChecks(rec.sets?.[id], setCount);
 
-            // インターバル（最後とその直前）→ 1時間単位
             const times = rec.times?.[id] ?? [];
             const n = times.length;
             const last = n ? new Date(times[n - 1]) : null;
@@ -373,37 +366,31 @@ export default function RecordTab() {
                 : undefined;
 
             return (
-              <div key={id} className="rounded-lg border border-slate-200 p-3">
+              <div key={id} className="rounded-lg border border-slate-200 p-3 sm:p-4">
                 {/* 種目名 */}
                 <div className="text-sm text-slate-700 break-words font-medium">
                   {it.name}
                 </div>
 
-                {/* インターバル（右寄せ、時間単位） */}
+                {/* インターバル（右寄せ） */}
                 <div className="mt-2 text-xs text-slate-500 text-right">
                   前回からのインターバル：
                   {intervalMs !== undefined ? formatHours(intervalMs) : "—"}
                 </div>
 
-                {/* 入力UI（右寄せ・5列折返し・正方形56px） */}
-                <div className="mt-2 flex">
-                  <div className="ml-auto inline-grid grid-cols-5 gap-2 auto-rows-[3.5rem]">
+                {/* 入力UI：w-fullで右端寄せ。iPhone重なり対策：固定行高56/ shrink-0 */}
+                <div className="mt-2 flex w-full">
+                  <div className="ml-auto grid grid-cols-5 gap-2 auto-rows-[56px] items-start justify-items-end">
                     {mode === "count"
                       ? countsArr.map((val, idx) => {
                           const update = (v: number) => {
                             setRec((prev) => {
-                              const prevCounts = padCounts(
-                                prev.counts?.[id],
-                                setCount
-                              );
+                              const prevCounts = padCounts(prev.counts?.[id], setCount);
                               const nextCounts = [...prevCounts];
                               nextCounts[idx] = v;
                               const next: DayRecord = {
                                 ...prev,
-                                counts: {
-                                  ...(prev.counts ?? {}),
-                                  [id]: nextCounts,
-                                },
+                                counts: { ...(prev.counts ?? {}), [id]: nextCounts },
                                 notesUpper: prev.notesUpper ?? "",
                                 notesLower: prev.notesLower ?? "",
                                 notesEtc: prev.notesEtc ?? "",
@@ -426,10 +413,7 @@ export default function RecordTab() {
                       : checksArr.map((on, idx) => {
                           const toggle = () => {
                             setRec((prev) => {
-                              const prevChecks = padChecks(
-                                prev.sets?.[id],
-                                setCount
-                              );
+                              const prevChecks = padChecks(prev.sets?.[id], setCount);
                               const nowOn = !prevChecks[idx];
                               const nextChecks = [...prevChecks];
                               nextChecks[idx] = nowOn;
@@ -441,14 +425,8 @@ export default function RecordTab() {
 
                               const next: DayRecord = {
                                 ...prev,
-                                sets: {
-                                  ...(prev.sets ?? {}),
-                                  [id]: nextChecks,
-                                },
-                                times: {
-                                  ...(prev.times ?? {}),
-                                  [id]: nextTimes,
-                                },
+                                sets: { ...(prev.sets ?? {}), [id]: nextChecks },
+                                times: { ...(prev.times ?? {}), [id]: nextTimes },
                                 notesUpper: prev.notesUpper ?? "",
                                 notesLower: prev.notesLower ?? "",
                                 notesEtc: prev.notesEtc ?? "",
@@ -477,16 +455,14 @@ export default function RecordTab() {
           })}
         </div>
 
-        {/* カテゴリメモ（既存仕様のまま） */}
+        {/* メモ：幅広め（w-full） */}
         <div className="mt-4">
           <div className="mb-1 text-xs text-slate-500">メモ（{label}）</div>
           <Textarea
+            className="w-full"
             value={
-              key === "upper"
-                ? rec.notesUpper
-                : key === "lower"
-                ? rec.notesLower
-                : rec.notesEtc
+              key === "upper" ? rec.notesUpper :
+              key === "lower" ? rec.notesLower : rec.notesEtc
             }
             onChange={(e) => {
               const v = e.target.value;
@@ -506,16 +482,11 @@ export default function RecordTab() {
 
   return (
     <>
-      {/* バナー（最上部固定） */}
       <Banner />
-
-      {/* バナーぶん余白 */}
       <div className={shouldPromptSave ? "pt-7 sm:pt-8" : ""}>
-        {/* ヘッダー */}
         <Header />
-
-        {/* 本文（横幅：解放） */}
-        <div className="w-full max-w-none px-3 sm:px-6 py-4">
+        {/* 本文：横幅解放＋左右余白を少し増やす */}
+        <div className="w-full max-w-none px-4 sm:px-6 py-4">
           {renderCategory("upper", "上半身")}
           {renderCategory("lower", "下半身")}
           {renderCategory("etc", "その他")}
@@ -525,7 +496,7 @@ export default function RecordTab() {
   );
 }
 
-/* ===== 末尾：1時間単位の表示 ===== */
+/* 時間表示（時間単位） */
 function formatHours(ms: number): string {
   const hours = Math.max(0, Math.floor(ms / (1000 * 60 * 60)));
   return `${hours}時間`;
