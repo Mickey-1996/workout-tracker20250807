@@ -5,21 +5,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Textarea } from "@/components/ui/Textarea";
 import { Checkbox } from "@/components/ui/Checkbox";
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "@/components/ui/Select";
 import { loadDayRecord, saveDayRecord, loadJSON } from "@/lib/local-storage";
-import type {
-  ExerciseItem,
-  ExercisesByCategory as ExercisesGrouped,
-  DayRecord,
-  Category,
-  InputMode,
-} from "@/lib/types";
+import type { ExerciseItem, DayRecord, Category, InputMode } from "@/lib/types";
 import { CalendarIcon } from "lucide-react";
 
 /* --- ユーティリティ --- */
@@ -28,17 +15,8 @@ function toYmd(d: Date): string {
   const day = `${d.getDate()}`.padStart(2, "0");
   return `${d.getFullYear()}-${m}-${day}`;
 }
-function buildYYMMDDTT(date = new Date()): string {
-  // 例: 2508172230（未使用だが既存のまま残す：lint抑止用コメント）
-  const y = String(date.getFullYear()).slice(-2);
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  const hh = String(date.getHours()).padStart(2, "0");
-  const mi = String(date.getMinutes()).padStart(2, "0");
-  return `${y}${mm}${dd}${hh}${mi}`;
-}
 
-// iOS Safari 向け：JSON をダウンロード（通常は「ダウンロード」フォルダ）
+// JSON をダウンロード（iOS Safari は通常「ダウンロード」へ保存）
 function downloadJSON(filename: string, data: unknown) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
@@ -75,6 +53,13 @@ function calcRecordsSignature(): string {
     .join("|");
   return hashString(ordered);
 }
+
+/* --- 型（プロジェクトのtypesに無いのでローカル定義） --- */
+type ExercisesGrouped = {
+  upper: ExerciseItem[];
+  lower: ExerciseItem[];
+  etc: ExerciseItem[];
+};
 
 /* --- 設定から種目ロード（後方互換を維持） --- */
 function loadExercises(): ExercisesGrouped {
@@ -113,7 +98,7 @@ function loadExercises(): ExercisesGrouped {
     return grouped;
   }
 
-  // 旧: exercises
+  // 旧: exercises / settings
   const legacy = loadJSON<any>("exercises") ?? loadJSON<any>("settings");
   if (legacy?.upper || legacy?.lower || legacy?.etc) {
     const grouped: ExercisesGrouped = { upper: [], lower: [], etc: [] };
@@ -261,7 +246,7 @@ export default function RecordTab() {
 
   return (
     <>
-      {/* レイアウト非依存の固定（fixed）バナー：タブ上部に重ねる。レイアウトは押さない＝揺れ防止 */}
+      {/* 固定（fixed）バナー：画面最上部。既存レイアウトを押さない */}
       {shouldPromptSave && (
         <div
           className="fixed top-0 left-0 right-0 z-50 text-center text-xs text-amber-700 bg-amber-50 border-b border-amber-200 py-1"
@@ -401,13 +386,4 @@ function CheckInput({
       })}
     </div>
   );
-}
-
-/* --- 末尾の小関数 --- */
-function formatDuration(ms: number): string {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = s % 60;
-  return h > 0 ? `${h}時間${m}分${sec}秒` : m > 0 ? `${m}分${sec}秒` : `${sec}秒`;
 }
