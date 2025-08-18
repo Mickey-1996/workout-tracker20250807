@@ -194,7 +194,7 @@ export default function RecordTab() {
     <>
       {shouldPromptSave && (
         <div className="fixed top-0 left-0 right-0 z-50 text-center text-xs text-amber-700 bg-amber-50 border-b border-amber-200 py-1" role="status" aria-live="polite">
-          10日以上ディスクに保存していません。右上の「保存」を押してください。
+          10日以上保存処理していません。右上の「保存」を押してください。
         </div>
       )}
 
