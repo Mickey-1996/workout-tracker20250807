@@ -1,4 +1,3 @@
-// src/tabs/RecordTab.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -179,7 +178,6 @@ export default function RecordTab() {
       notesLower: data.notesLower ?? "",
       notesEtc: data.notesEtc ?? "",
     };
-    // パラメータ型を直接参照してキャスト
     saveDayRecord(date, normalized as Parameters<typeof saveDayRecord>[1]);
   };
 
@@ -332,7 +330,6 @@ export default function RecordTab() {
                               return next;
                             });
                           };
-                          // 最大 15
                           const max = Math.min(it.repTarget ?? 15, 15);
                           return <SquareCount key={`${id}-count-${idx}`} value={val} onChange={update} max={max} />;
                         })
