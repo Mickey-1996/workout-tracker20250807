@@ -174,7 +174,7 @@ export default function SummaryTab() {
         }
       }
     }
-    // 0だけの行は非表示に（必要ならこの filter を外せば全種目表示）
+    // 0だけの行は非表示に
     const rows = Array.from(byId.values()).filter((r) => r.countSum > 0 || r.setSum > 0);
     // 表示順は設定順
     const orderIndex = new Map(items.map((it, i) => [it.id, i]));
@@ -194,7 +194,7 @@ export default function SummaryTab() {
     day: { margin: 2 },
   };
 
-  /* ------ 復元（record.latest.json を読み込む） ------ */
+  /* ------ 復元（workoutrecord.latest を読み込む） ------ */
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleClickRestore = () => {
@@ -256,7 +256,8 @@ export default function SummaryTab() {
         <input
           ref={fileInputRef}
           type="file"
-          accept="application/json"
+          // ✅ 拡張子なし（workoutrecord.latest）を拾えるよう accept を広げる
+          accept=".latest,.json,application/json,*/*"
           className="hidden"
           onChange={handleRestoreFile}
         />

@@ -52,7 +52,7 @@ function downloadJSON(filename: string, data: unknown) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = filename; // 例: "workoutrecord.2508172230"
+  a.download = filename; // ← 仕様：常に "workoutrecord.latest"
   a.click();
   URL.revokeObjectURL(a.href);
 }
@@ -98,7 +98,7 @@ function hasAnyData(r: DayRecord | DayRecordStrict | null | undefined) {
 /** 可能な設定ソース:
  *  1) wt:settings.v2 ... { items: [{ id, name, category, enabled, mode/inputMode, sets/checkCount, repTarget, order }] }
  *  2) exercises      ... { upper/lower/etc: [{...}] }
- *  3) wt:settings    ... { upper/lower/etc: [{...}] } ← これを新たにサポート（レガシー）
+ *  3) wt:settings    ... { upper/lower/etc: [{...}] } ← レガシー
  */
 function loadExercises(): ExercisesGrouped {
   // v2（新フォーマット）
@@ -133,7 +133,7 @@ function loadExercises(): ExercisesGrouped {
   const groupedFromRaw = normalizeLegacyGrouped(raw);
   if (groupedFromRaw) return groupedFromRaw;
 
-  // 旧: wt:settings（今回追加）
+  // 旧: wt:settings
   const legacy = loadJSON<any>("wt:settings");
   const groupedFromLegacy = normalizeLegacyGrouped(legacy);
   if (groupedFromLegacy) return groupedFromLegacy;
@@ -215,7 +215,7 @@ export default function RecordTab() {
           notesUpper: loaded.notesUpper ?? "",
           notesLower: loaded.notesLower ?? "",
           notesEtc: loaded.notesEtc ?? "",
-          ...(loaded.notesOther !== undefined ? { notesOther: loaded.notesOther } : {}),
+          ...(loaded as any).notesOther !== undefined ? { notesOther: (loaded as any).notesOther } : {},
         });
       }
     } catch {}
@@ -256,7 +256,7 @@ export default function RecordTab() {
       notesUpper: next.notesUpper ?? "",
       notesLower: next.notesLower ?? "",
       notesEtc: next.notesEtc ?? "",
-      ...(next.notesOther !== undefined ? { notesOther: next.notesOther } : {}),
+      ...(next as any).notesOther !== undefined ? { notesOther: (next as any).notesOther } : {},
     };
     const normalizedStrict: DayRecordStrict = {
       date: normalized.date,
@@ -286,7 +286,55 @@ export default function RecordTab() {
     });
   };
 
-  /* --- UI: カテゴリ --- */
+  /* ---- UI: レイアウト安定化 ---- */
+
+  // バナーのスロット：表示の有無で高さが変わらないように常に枠を確保
+  const BannerSlot = () => (
+    <div className="sticky top-0 z-50">
+      <div className="h-7 sm:h-8 bg-transparent">
+        {shouldPromptSave && (
+          <div
+            className="absolute inset-x-0 top-0 text-center text-[11px] sm:text-xs text-amber-700 bg-amber-50 border-b border-amber-200 py-1"
+            role="status"
+            aria-live="polite"
+          >
+            10日以上保存していません。右上の「保存」を押してください。
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  // ヘッダー：sticky（上部固定）、上段＝保存ボタン（右）、下段＝日付（左）
+  const Header = () => (
+    <div className="sticky top-7 sm:top-8 z-40 bg-white/90 backdrop-blur border-b">
+      <div className="mx-auto max-w-3xl px-4 sm:px-6 py-2 flex items-center justify-end">
+        {hasUnsavedChanges && <span className="mr-3 text-xs text-rose-600">未保存の変更があります</span>}
+        <button
+          type="button"
+          className="rounded-md border px-3 py-1 text-sm hover:bg-slate-50"
+          onClick={() => {
+            const payload = collectAllDayRecords();
+            downloadJSON("workoutrecord.latest", payload); // 仕様どおりの固定名
+            const sig = calcRecordsSignature();
+            const t = Date.now();
+            localStorage.setItem("wt:lastDiskSaveAt", String(t));
+            localStorage.setItem("wt:lastSavedSig", sig);
+            setLastDiskSaveAt(t);
+            setLastSavedSig(sig);
+            setCurrentSig(sig);
+          }}
+          aria-label="記録データを端末に保存"
+        >
+          保存
+        </button>
+      </div>
+      <div className="mx-auto max-w-3xl px-4 sm:px-6 pb-2">
+        <div className="text-slate-700">{displayDate}</div>
+      </div>
+    </div>
+  );
+
   const renderCategory = (key: "upper" | "lower" | "etc", label: string) => {
     const items = exercises[key].filter((it) => it.enabled ?? true);
     return (
@@ -298,63 +346,71 @@ export default function RecordTab() {
             const mode = (it.mode ?? it.inputMode ?? "check") as InputMode;
             const setCount = it.sets ?? it.checkCount ?? 3;
 
-            // 1行目：種目名 + 入力UI
+            // 1行目：種目名 + 入力UI（グリッドで安定配置）
             const row1 = (
-              <div className="flex items-center gap-3 whitespace-nowrap overflow-x-auto">
-                <div className="text-sm text-slate-700 min-w-[6rem]">{it.name}</div>
-                {mode === "count" ? (
-                  <div className="flex items-center gap-2">
-                    {(rec.counts?.[id] ?? Array.from({ length: setCount }, () => 0)).map((val, idx) => {
-                      const update = (v: number) => {
-                        const prev = rec.counts?.[id] ?? Array.from({ length: setCount }, () => 0);
-                        const nextCounts = [...prev];
-                        nextCounts[idx] = v;
-                        persist({ ...rec, counts: { ...(rec.counts ?? {}), [id]: nextCounts } });
-                      };
-                      const max = it.repTarget ?? 20;
-                      return (
-                        <div key={idx} className="flex items-center gap-1">
-                          <span className="text-xs text-slate-500">S{idx + 1}</span>
-                          <Select value={String(val)} onValueChange={(v) => update(Number(v))}>
-                            <SelectTrigger className="h-8 w-20">
-                              <SelectValue placeholder="0" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {Array.from({ length: max + 1 }, (_, n) => n).map((n) => (
-                                <SelectItem key={n} value={String(n)}>
-                                  {n}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    {makeSetArray(setCount).map((idx) => {
-                      const checks = rec.sets?.[id] ?? Array.from({ length: setCount }, () => false);
-                      const toggle = () => {
-                        const nextChecks = [...checks];
-                        nextChecks[idx] = !nextChecks[idx];
-                        const next = { ...rec, sets: { ...(rec.sets ?? {}), [id]: nextChecks } };
-                        persist(next);
-                        if (nextChecks[idx]) markDone(id);
-                      };
-                      return (
-                        <label key={idx} className="flex items-center gap-2 rounded-md border px-2 py-1">
-                          <Checkbox checked={!!checks[idx]} onCheckedChange={toggle} />
-                          <span className="text-xs text-slate-600">S{idx + 1}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                )}
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
+                {/* 種目名（折返し可） */}
+                <div className="sm:col-span-4 text-sm text-slate-700 break-words">
+                  {it.name}
+                </div>
+
+                {/* 入力UI（5個で改行に統一） */}
+                <div className="sm:col-span-8">
+                  {mode === "count" ? (
+                    <div className="grid grid-cols-5 gap-2">
+                      {(rec.counts?.[id] ?? Array.from({ length: setCount }, () => 0)).map((val, idx) => {
+                        const update = (v: number) => {
+                          const prev = rec.counts?.[id] ?? Array.from({ length: setCount }, () => 0);
+                          const nextCounts = [...prev];
+                          nextCounts[idx] = v;
+                          persist({ ...rec, counts: { ...(rec.counts ?? {}), [id]: nextCounts } });
+                        };
+                        const max = it.repTarget ?? 20;
+                        return (
+                          <div key={idx} className="flex items-center gap-1 h-8">
+                            <span className="text-xs text-slate-500">S{idx + 1}</span>
+                            <Select value={String(val)} onValueChange={(v) => update(Number(v))}>
+                              <SelectTrigger className="h-8 w-20">
+                                <SelectValue placeholder="0" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {Array.from({ length: max + 1 }, (_, n) => n).map((n) => (
+                                  <SelectItem key={n} value={String(n)}>{n}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-5 gap-2">
+                      {makeSetArray(setCount).map((idx) => {
+                        const checks = rec.sets?.[id] ?? Array.from({ length: setCount }, () => false);
+                        const toggle = () => {
+                          const nextChecks = [...checks];
+                          nextChecks[idx] = !nextChecks[idx];
+                          const next = { ...rec, sets: { ...(rec.sets ?? {}), [id]: nextChecks } };
+                          persist(next);
+                          if (nextChecks[idx]) markDone(id);
+                        };
+                        return (
+                          <label
+                            key={idx}
+                            className="flex items-center gap-2 rounded-md border px-2 py-1 h-8"
+                          >
+                            <Checkbox checked={!!checks[idx]} onCheckedChange={toggle} />
+                            <span className="text-xs text-slate-600">S{idx + 1}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
             );
 
-            // 2行目：インターバル
+            // 2行目：インターバル（折返し前提・横揺れなし）
             const times = rec.times?.[id] ?? [];
             const n = times.length;
             const last = n ? new Date(times[n - 1]) : null;
@@ -363,7 +419,7 @@ export default function RecordTab() {
               last && prev ? last.getTime() - prev.getTime() : last ? Date.now() - last.getTime() : undefined;
 
             const row2 = (
-              <div className="mt-1 text-xs text-slate-500 whitespace-nowrap overflow-x-auto">
+              <div className="mt-1 text-xs text-slate-500">
                 前回から：{intervalMs !== undefined ? formatDuration(intervalMs) : "—"}{" "}
                 {last && <span className="ml-3">最終：{last.toLocaleTimeString()}</span>}
               </div>
@@ -406,60 +462,16 @@ export default function RecordTab() {
     );
   };
 
-  // YYMMDDTT（TT=時分：HHmm）形式のファイル名を生成
-  const buildYYMMDDTT = () => {
-    const now = new Date();
-    const YY = String(now.getFullYear()).slice(-2);
-    const MM = String(now.getMonth() + 1).padStart(2, "0");
-    const DD = String(now.getDate()).padStart(2, "0");
-    const TT = `${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}`;
-    return `${YY}${MM}${DD}${TT}`;
-  };
-
   return (
     <>
-      {/* レイアウト非依存の固定（fixed）バナー：タブ上部に重ねる。レイアウトは押さない＝揺れ防止 */}
-      {shouldPromptSave && (
-        <div
-          className="fixed top-0 left-0 right-0 z-50 text-center text-[11px] sm:text-xs text-amber-700 bg-amber-50 border-b border-amber-200 py-1"
-          role="status"
-          aria-live="polite"
-        >
-          10日以上ディスクに保存していません。右上の「保存」を押してください。
-        </div>
-      )}
+      {/* 1) バナーのためのスロット（高さを常時確保） */}
+      <BannerSlot />
 
-      <div className="p-4 sm:p-6">
-        {/* ヘッダー：上＝保存ボタン（右寄せ）、下＝日付表示 */}
-        <div className="mb-1 flex items-center justify-end">
-          {hasUnsavedChanges && <span className="mr-3 text-xs text-rose-600">未保存の変更があります</span>}
-          <button
-            type="button"
-            className="rounded-md border px-3 py-1 text-sm hover:bg-slate-50"
-            onClick={() => {
-              const filename = `workoutrecord.${buildYYMMDDTT()}`; // 要件②
-              const payload = collectAllDayRecords();
-              downloadJSON(filename, payload); // iPhone の「ダウンロード」に保存
+      {/* 2) 上部ヘッダー（保存ボタン／日付） */}
+      <Header />
 
-              const sig = calcRecordsSignature();
-              const t = Date.now();
-              localStorage.setItem("wt:lastDiskSaveAt", String(t));
-              localStorage.setItem("wt:lastSavedSig", sig);
-              setLastDiskSaveAt(t);
-              setLastSavedSig(sig);
-              setCurrentSig(sig);
-            }}
-            aria-label="記録データを端末に保存"
-          >
-            保存
-          </button>
-        </div>
-
-        {/* 日付表示 */}
-        <div className="mb-4 flex items-center justify-between">
-          <div className="text-slate-700">{displayDate}</div>
-        </div>
-
+      {/* 3) 本文 */}
+      <div className="mx-auto max-w-3xl px-4 sm:px-6 py-4">
         {renderCategory("upper", "上半身")}
         {renderCategory("lower", "下半身")}
         {renderCategory("etc", "その他")}
