@@ -20,7 +20,7 @@ import type {
 } from "@/lib/types";
 
 /* ================== Utils ================== */
-const EXPORT_FILENAME = "workoutrecord.latest"; // SettingsTabに合わせ拡張子なし
+const EXPORT_FILENAME = "workoutrecord.latest"; // SettingsTabと同等。拡張子なしで固定
 
 const toYmd = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
@@ -114,7 +114,7 @@ function saveAsJson_LikeSettingsTab(filename: string, data: unknown): boolean {
   }
 }
 
-/* -------- 設定ロード（SettingsTabの保存形式に対応） -------- */
+/* -------- 設定ロード -------- */
 function loadExercises(): ExercisesGrouped {
   // v2形式（settingsタブの最新仕様）
   const v2 = loadJSON<any>("wt:settings.v2");
@@ -286,10 +286,14 @@ export default function RecordTab() {
           type="button"
           className="rounded-md border px-3 py-1 text-sm hover:bg-slate-50"
           onClick={() => {
+            // ① 当日分をlocalStorageへ確実に反映
+            saveSafe(todayStr, rec);
+
+            // ② 全日分を収集して SettingsTab と同じ手順で保存
             const payload = collectAllDayRecords();
             const ok = saveAsJson_LikeSettingsTab(EXPORT_FILENAME, payload);
 
-            // 署名・時刻の更新（保存経路に関係なく）
+            // ③ 署名・時刻の更新（未保存警告の抑制）
             const sig = calcRecordsSignature();
             const t = Date.now();
             localStorage.setItem("wt:lastDiskSaveAt", String(t));
@@ -297,6 +301,7 @@ export default function RecordTab() {
             setLastDiskSaveAt(t);
             setLastSavedSig(sig);
             setCurrentSig(sig);
+
             alert(ok ? `保存しました（${EXPORT_FILENAME}）` : "保存に失敗しました");
           }}
           aria-label="記録データを保存"
@@ -405,8 +410,18 @@ export default function RecordTab() {
                 </div>
 
                 {/* 入力UI：右端寄せ・折返し時も重ならない（iPhone対策） */}
-                <div className="mt-2 w-full flex justify-end">
-                  <div className="inline-grid grid-cols-5 gap-x-2 gap-y-3 auto-rows-[64px]">
+                <div className="mt-2 w-full">
+                  <div
+                    className="
+                      ml-auto
+                      grid
+                      [grid-template-columns:repeat(5,56px)]
+                      gap-x-2 gap-y-3
+                      auto-rows-[64px]
+                      justify-items-end content-start
+                      w-[min(100%,336px)]
+                    "
+                  >
                     {mode === "count"
                       ? countsArr.map((val, idx) => {
                           const update = (v: number) => {
@@ -512,12 +527,10 @@ export default function RecordTab() {
 
   return (
     <>
-      {/* バナー */}
       <Banner />
-
-      {/* ヘッダー＋本文（他タブと同等の余白） */}
       <div className={shouldPromptSave ? "pt-7 sm:pt-8" : ""}>
         <Header />
+        {/* 本文：他タブと同等の余白 */}
         <div className="w-full max-w-none px-4 sm:px-6 py-4">
           {renderCategory("upper", "上半身")}
           {renderCategory("lower", "下半身")}
