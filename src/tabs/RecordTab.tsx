@@ -61,7 +61,7 @@ function isDayRecordObject(x: any): boolean {
   );
 }
 function collectAllDayRecords(): Record<string, unknown> {
-  if (!isBrowser) return {}; // SSRでは空
+  if (!isBrowser) return {};
   const out: Record<string, unknown> = {};
   const keyLike = /^(day:|wt:day:|record:|workout:|train:|\d{4}-\d{2}-\d{2}$)/i;
   for (let i = 0; i < window.localStorage.length; i++) {
@@ -77,7 +77,7 @@ function collectAllDayRecords(): Record<string, unknown> {
   return out;
 }
 const calcRecordsSignature = () => {
-  if (!isBrowser) return ""; // SSRでは空
+  if (!isBrowser) return "";
   const obj = collectAllDayRecords();
   const ordered = Object.keys(obj)
     .sort()
@@ -96,7 +96,7 @@ const hasAnyData = (r?: Partial<DayRecord>) => {
   return false;
 };
 
-/** SettingsTab同等の保存（SSR安全） */
+/** 設定風エクスポート（SSR安全） */
 function saveAsJsonLikeSettings(filename: string, data: unknown): boolean {
   if (!isBrowser) return false;
   const text = jsonString(data);
@@ -115,7 +115,7 @@ function saveAsJsonLikeSettings(filename: string, data: unknown): boolean {
   }
 }
 
-/* ===== インターバル表示：時間（<1h は 0時間） ===== */
+/* ===== インターバル：時間（<1h は 0時間） ===== */
 function formatHours(ms: number): string {
   if (!isFinite(ms) || ms <= 0) return "0時間";
   const hours = Math.floor(ms / (1000 * 60 * 60));
@@ -273,7 +273,7 @@ export default function RecordTab() {
     setCurrentSig(calcRecordsSignature());
   };
 
-  /* ------ 全日データから直近2回の時刻を構築（SSR安全） ------ */
+  /* ------ 全日データから直近「最後の1回」を取得（SSR安全） ------ */
   const timesIndex = useMemo(() => {
     if (!isBrowser) return {} as Record<string, number[]>;
     const all = collectAllDayRecords();
@@ -313,7 +313,6 @@ export default function RecordTab() {
           type="button"
           className="rounded-md border px-3 py-1 text-sm hover:bg-slate-50"
           onClick={() => {
-            // 当日分を確実反映 → 全日分収集 → 保存
             saveSafe(todayStr, rec);
             const payload = collectAllDayRecords();
             const ok = saveAsJsonLikeSettings(EXPORT_FILENAME, payload);
@@ -408,11 +407,13 @@ export default function RecordTab() {
             const checksArr = padChecks(rec.sets?.[id], setCount);
             const arrLen = mode === "count" ? countsArr.length : checksArr.length;
 
-            // 直近2回（全日） → 差分
+            // ★ 修正点：最後に実施した時刻から現在までの経過時間
             const arr = timesIndex[id] ?? [];
             let intervalMs: number | undefined;
-            if (arr.length >= 2) intervalMs = arr[arr.length - 1] - arr[arr.length - 2];
-            else if (arr.length === 1) intervalMs = Date.now() - arr[0];
+            if (arr.length >= 1) {
+              const lastTs = arr[arr.length - 1];
+              intervalMs = Math.max(0, Date.now() - lastTs);
+            }
 
             return (
               <div key={id} className="p-1 sm:p-4 overflow-hidden">
@@ -421,8 +422,7 @@ export default function RecordTab() {
                 </div>
 
                 <div className="mt-2 text-xs text-slate-500 text-right">
-                  前回からのインターバル：
-                  {intervalMs !== undefined ? formatHours(intervalMs) : "0時間"}
+                  前回からのインターバル：{intervalMs !== undefined ? formatHours(intervalMs) : "0時間"}
                 </div>
 
                 {/* 入力列：右寄せ（実ボックス数ぶんだけ列を生成） */}
@@ -486,7 +486,7 @@ export default function RecordTab() {
                                 notesEtc: prev.notesEtc ?? "",
                               };
                               saveSafe(todayStr, next);
-                              setCurrentSig(calcRecordsSignature()); // timesIndex再構築
+                              setCurrentSig(calcRecordsSignature()); // → timesIndex再構築
                               return next;
                             });
                           };
