@@ -17,13 +17,11 @@ import { loadJSON, saveJSON } from "@/lib/local-storage";
 import { defaultExercises } from "@/lib/exercises-default";
 
 const SETTINGS_KEY = "settings-v1";
-// ✅ 仕様：固定ファイル名に変更（.jsonは付けない）
 const SETTINGS_DOWNLOAD_FILENAME = "settings.latest";
 
-/** types.ts は触らず UI 側だけで拡張 */
 type ExtendedExerciseItem = ExerciseItem & {
-  repTarget?: number;   // 回数入力モード時のノルマ回数
-  checkCount?: number;  // セット数（旧: sets 互換あり）
+  repTarget?: number;
+  checkCount?: number;
   sets?: number;
   order?: number;
   enabled?: boolean;
@@ -31,7 +29,6 @@ type ExtendedExerciseItem = ExerciseItem & {
 
 type Settings = { items: ExtendedExerciseItem[] };
 
-/* ===== ユーティリティ（順序正規化・比較） ===== */
 const cmpOrderName = (a: ExtendedExerciseItem, b: ExtendedExerciseItem) =>
   (a.order ?? 0) - (b.order ?? 0) || (a.name ?? "").localeCompare(b.name ?? "");
 
@@ -72,7 +69,6 @@ function toItemSafe(raw: any, fallbackCat: Cat3 = "other"): ExtendedExerciseItem
   };
 }
 
-/** RecordTab 互換の "exercises" 形式（upper/lower/other）を作る */
 function groupForCompat(list: ExtendedExerciseItem[]) {
   const g: Record<Cat3, any[]> = { upper: [], lower: [], other: [] };
   for (const it of list) {
@@ -101,7 +97,7 @@ function newItem(cat: Cat3): ExtendedExerciseItem {
     checkCount: 3,
     sets: 3,
     enabled: true,
-    order: 0, // 後で normalize される
+    order: 0,
   };
 }
 
@@ -111,7 +107,6 @@ export default function SettingsTab() {
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    // 既存データ → なければデフォルト種目
     const saved = loadJSON<Settings>(SETTINGS_KEY);
     const base =
       saved?.items?.length
@@ -124,7 +119,6 @@ export default function SettingsTab() {
   useEffect(() => {
     if (!ready) return;
     const normalized = normalizeOrders(items);
-    // v1 / v2 / 互換キーに保存
     saveJSON(SETTINGS_KEY, { items: normalized });
     saveJSON("wt:settings.v2", { items: normalized });
     saveJSON("exercises", groupForCompat(normalized));
@@ -156,7 +150,6 @@ export default function SettingsTab() {
   const remove = (id: string) =>
     setItems((prev) => normalizeOrders(prev.filter((x) => x.id !== id)));
 
-  /** ↑/↓：カテゴリ内で1つ移動し、連動して連番を振り直す */
   const move = (id: string, dir: -1 | 1) =>
     setItems((prev) => {
       const arr = [...prev];
@@ -164,7 +157,6 @@ export default function SettingsTab() {
       if (idx < 0) return prev;
       const cat = toCat3(arr[idx].category);
 
-      // 対象カテゴリの並び（現在の order で整列）
       const catList = arr
         .filter((x) => toCat3(x.category) === cat)
         .sort(cmpOrderName);
@@ -172,11 +164,9 @@ export default function SettingsTab() {
       const nextPos = pos + dir;
       if (nextPos < 0 || nextPos >= catList.length) return prev;
 
-      // 1つ移動
       const moved = catList.splice(pos, 1)[0];
       catList.splice(nextPos, 0, moved);
 
-      // 連番を再付与
       catList.forEach((x, i) => {
         const k = arr.findIndex((y) => y.id === x.id);
         if (k >= 0) arr[k] = { ...arr[k], order: i + 1, category: cat };
@@ -185,17 +175,14 @@ export default function SettingsTab() {
       return arr;
     });
 
-  /* ---------- 保存/復元（ファイル） ---------- */
   const handleClickSave = () => {
     const normalized = normalizeOrders(items);
     const data: Settings = { items: normalized };
 
-    // localStorage（互換キーにも保存）
     saveJSON(SETTINGS_KEY, data);
     saveJSON("wt:settings.v2", data);
     saveJSON("exercises", groupForCompat(normalized));
 
-    // ✅ ダウンロード（固定名：settings.latest）
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -241,7 +228,6 @@ export default function SettingsTab() {
 
       const normalized = normalizeOrders(list);
 
-      // 保存（localStorage）
       saveJSON(SETTINGS_KEY, { items: normalized });
       saveJSON("wt:settings.v2", { items: normalized });
       saveJSON("exercises", groupForCompat(normalized));
@@ -271,7 +257,6 @@ export default function SettingsTab() {
               key={it.id}
               className="grid grid-cols-1 gap-3 sm:grid-cols-12 sm:items-center rounded-md border p-3"
             >
-              {/* 記録対象 */}
               <label className="flex items-center gap-2 sm:col-span-2">
                 <Checkbox
                   checked={it.enabled !== false}
@@ -280,7 +265,6 @@ export default function SettingsTab() {
                 <span className="text-sm">記録対象</span>
               </label>
 
-              {/* 種目名 */}
               <div className="sm:col-span-4">
                 <Input
                   placeholder="種目名（例：フル懸垂 5回×3セット）"
@@ -289,7 +273,6 @@ export default function SettingsTab() {
                 />
               </div>
 
-              {/* 入力方式 */}
               <div className="sm:col-span-3">
                 <Select
                   value={it.inputMode ?? "check"}
@@ -305,7 +288,6 @@ export default function SettingsTab() {
                 </Select>
               </div>
 
-              {/* セット数（選択式 1〜5） */}
               <div className="flex items-center gap-2 sm:col-span-2">
                 <span className="text-sm opacity-80">セット数</span>
                 <select
@@ -323,7 +305,6 @@ export default function SettingsTab() {
                 </select>
               </div>
 
-              {/* ノルマ回数（回数入力のときだけ選択式：1〜99、未設定あり） */}
               {(it.inputMode ?? "check") === "count" && (
                 <div className="flex items-center gap-2 sm:col-span-1">
                   <span className="text-sm opacity-80">ノルマ回数</span>
@@ -346,7 +327,6 @@ export default function SettingsTab() {
                 </div>
               )}
 
-              {/* 順序表示 + 並び替え/削除 */}
               <div className="flex gap-2 sm:col-span-12 sm:justify-end">
                 <span className="text-xs px-2 py-1 rounded border">
                   順序 {it.order ?? idxInCat + 1}
@@ -375,14 +355,28 @@ export default function SettingsTab() {
 
   return (
     <div className="space-y-6">
-      {/* 保存／復元（ページ上部・右寄せ） */}
       <div className="flex justify-end gap-2">
         <input
           ref={fileRef}
           type="file"
-          // ✅ 拡張子なし（settings.latest）を拾えるよう accept を広げる
           accept=".latest,.json,application/json,*/*"
           className="hidden"
           onChange={handleRestoreFile}
         />
-        <Button variant="secondary" onClick={handleClickRestore
+        <Button variant="secondary" onClick={handleClickRestore}>復元</Button>
+        <Button onClick={handleClickSave}>保存</Button>
+      </div>
+
+      <h2 className="text-xl font-bold">設定</h2>
+      <p className="text-sm opacity-80">
+        ・「セット数」は選択式（1〜5）です。<br />
+        ・回数入力を選ぶと「ノルマ回数」を選択式（1〜99）で設定できます。未設定も可。
+      </p>
+
+      {Block("upper", "上半身")}
+      {Block("lower", "下半身")}
+      {Block("other", "その他")}
+    </div>
+  );
+}
+
