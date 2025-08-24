@@ -17,7 +17,7 @@ import type {
   DayRecord,
   InputMode,
 } from "@/types/record";
-import { EXERCISES } from "@/data/exercises";
+import { EXERCISES } from "../data/exercises";
 import { cn } from "@/lib/utils";
 
 /* ============== 型 ============== */
