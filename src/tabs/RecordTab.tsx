@@ -115,11 +115,12 @@ function saveAsJsonLikeSettings(filename: string, data: unknown): boolean {
   }
 }
 
-/* ===== インターバル：時間（<1h は 0時間） ===== */
+/* ===== インターバル：時間（<1h は <1時間） ===== */
 function formatHours(ms: number): string {
   if (!isFinite(ms) || ms <= 0) return "<1時間";
   const hours = Math.floor(ms / (1000 * 60 * 60));
-  return `${Math.max(0, hours)}時間`;
+  if (hours < 1) return "<1時間";
+  return `${hours}時間`;
 }
 
 /* -------- 設定ロード -------- */
@@ -407,7 +408,7 @@ export default function RecordTab() {
             const checksArr = padChecks(rec.sets?.[id], setCount);
             const arrLen = mode === "count" ? countsArr.length : checksArr.length;
 
-            // ★ 修正点：最後に実施した時刻から現在までの経過時間
+            // 最後に実施した時刻から現在までの経過時間
             const arr = timesIndex[id] ?? [];
             let intervalMs: number | undefined;
             if (arr.length >= 1) {
@@ -444,7 +445,7 @@ export default function RecordTab() {
                               const prevVal = prevCounts[idx];
                               nextCounts[idx] = v;
 
-                              // ★追加：数値選択ボックス入力時にタイムスタンプを保存（checkと同形式）
+                              // 数値選択ボックス入力時にタイムスタンプを保存（checkと同形式）
                               const prevTimes = prev.times?.[id] ?? [];
                               const nextTimes =
                                 prevVal !== v
