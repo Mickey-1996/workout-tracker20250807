@@ -17,7 +17,7 @@ import type {
   DayRecord,
   InputMode,
 } from "@/types/record";
-import { EXERCISES } from "../data/exercises";
+import { EXERCISES } from "@/data/exercises";
 import { cn } from "@/lib/utils";
 
 /* ============== 型 ============== */
@@ -275,7 +275,7 @@ export default function RecordTab() {
             const checksArr = padChecks(rec.sets?.[id], setCount);
             const arrLen = mode === "count" ? countsArr.length : checksArr.length;
 
-            // ★ インターバル（最後の記録からの経過時間）
+            // インターバル（最後の記録からの経過時間）
             const arr = timesIndex[id] ?? [];
             let intervalMs: number | undefined;
             if (arr.length >= 1) {
@@ -312,7 +312,7 @@ export default function RecordTab() {
                               const prevVal = prevCounts[idx];
                               nextCounts[idx] = v;
 
-                              // ★ 追加（最小差分）：値が変わったときだけタイムスタンプを追記
+                              // ★ 最小差分：値が変わったときだけタイムスタンプを追記（check と同じ形式）
                               const prevTimes = (prev.times?.[id] ?? []);
                               const nextTimes =
                                 prevVal !== v
