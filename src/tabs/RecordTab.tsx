@@ -21,12 +21,34 @@ import { EXERCISES } from "@/data/exercises";
 import { cn } from "@/lib/utils";
 
 /* ============== 型 ============== */
-type TimesIndex = Record<string, string[]>;
+type DayRecordLike = {
+  sets?: Record<string, boolean[]>;
+  counts?: Record<string, number[]>;
+  times?: Record<string, string[]>;
+  notesUpper?: string | null;
+  notesLower?: string | null;
+  notesEtc?: string | null;
+};
+type TimesIndex = Record<string, number[]>;
 
 /* ============== LocalStorage ============== */
 const STORAGE_KEY_DAYRECORD = "workout.records.byday";
 
-/* ============== カード ============== */
+/* ============== 便利関数 ============== */
+function normalizeDayRecord(input: DayRecordLike | null | undefined): DayRecord {
+  const r = (input ?? {}) as DayRecordLike;
+  return {
+    sets: r.sets ?? {},
+    counts: r.counts ?? {},
+    times: r.times ?? {},
+    notesUpper: r.notesUpper ?? "",
+    notesLower: r.notesLower ?? "",
+    notesEtc: r.notesEtc ?? "",
+  };
+}
+function isDayRecordObject(v: any): v is DayRecordLike {
+  return v && typeof v === "object";
+}
 function saveSafe(dateKey: string, r: DayRecord) {
   try {
     saveDayRecord(dateKey, r);
@@ -35,73 +57,171 @@ function saveSafe(dateKey: string, r: DayRecord) {
     alert("保存に失敗しました（ローカルストレージ容量超過の可能性）");
   }
 }
+function padCounts(src: number[] | undefined, setCount: number) {
+  const c = clampSets(setCount);
+  return Array.from({ length: c }, (_, i) => (src?.[i] ?? 0));
+}
+function padChecks(src: boolean[] | undefined, setCount: number) {
+  const c = clampSets(setCount);
+  return Array.from({ length: c }, (_, i) => Boolean(src?.[i]));
+}
+function formatHours(ms: number) {
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  return `${h}時間${m}分`;
+}
+const clampSets = (n: number) =>
+  Math.max(1, Math.min(10, isFinite(n) ? Math.floor(n) : 3));
+const isBrowser = typeof window !== "undefined";
+const toYmd = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate()
+  ).padStart(2, "0")}`;
+const EXPORT_FILENAME = "workoutrecord.latest";
 
-/* ============== ヘッダバナー ============== */
-function Banner() {
-  return (
-    <div className="w-full bg-slate-50 border-b border-slate-200">
-      <div className="max-w-5xl mx-auto py-3 px-4 sm:px-6">
-        <div className="text-xs text-slate-500">
-          筋トレ記録アプリ — ローカル保存 / set & count / インターバル表示
-        </div>
-      </div>
-    </div>
-  );
+/* ============== 直近数日分のレコード収集（SSR安全） ============== */
+function collectAllDayRecords(days: number = 30): Record<string, DayRecord> {
+  const map: Record<string, DayRecord> = {};
+  if (!isBrowser) return map;
+
+  try {
+    const raw = loadJSON<Record<string, DayRecordLike>>(STORAGE_KEY_DAYRECORD) ?? {};
+    const now = new Date();
+    const keys = Object.keys(raw).filter((k) => {
+      const d = new Date(k);
+      const diff = Number(now) - Number(d);
+      return diff >= 0 && diff <= days * 24 * 60 * 60 * 1000;
+    });
+    keys.forEach((k) => (map[k] = normalizeDayRecord(raw[k])));
+  } catch (e) {
+    console.error(e);
+  }
+  return map;
+}
+
+/* ============== 現在の全データに対するシグネチャ ============== */
+function calcRecordsSignature() {
+  const src = collectAllDayRecords();
+  const ordered = JSON.stringify(src, Object.keys(src).sort());
+  let h = 0;
+  for (let i = 0; i < ordered.length; i++) {
+    h = (h << 5) - h + ordered.charCodeAt(i);
+    h |= 0;
+  }
+  return String(h);
+}
+
+/* ============== hasAnyData ============== */
+function hasAnyData(r?: Partial<DayRecord>) {
+  if (!r) return false;
+  if ((r.notesUpper ?? "") + (r.notesLower ?? "") + (r.notesEtc ?? "") !== "") return true;
+  if (r.sets && Object.values(r.sets).some((a) => a?.some(Boolean))) return true;
+  if (r.counts && Object.values(r.counts).some((a) => a?.some((n) => (n ?? 0) > 0))) return true;
+  return false;
 }
 
 /* ============== メイン ============== */
 export default function RecordTab() {
-  /* ---------------- 日付 ---------------- */
+  /* ------ 日付 ------ */
   const [today, setToday] = useState(() => new Date());
   useEffect(() => {
     const id = setInterval(() => setToday(new Date()), 1000 * 60);
     return () => clearInterval(id);
   }, []);
   const todayStr = useMemo(() => toYmd(today), [today]);
-  const displayDate = useMemo(
-    () =>
-      `${today.getFullYear()}/${String(today.getMonth() + 1).padStart(
-        2,
-        "0"
-      )}/${String(today.getDate()).padStart(2, "0")}`,
-    [today]
-  );
 
-  /* ---------------- 記録（当日） ---------------- */
-  const [rec, setRec] = useState<DayRecord>(() => loadDayRecord(todayStr));
+  /* ------ 記録（当日） ------ */
+  const [rec, setRec] = useState<DayRecord>(() => normalizeDayRecord(loadDayRecord(todayStr)));
   useEffect(() => {
-    setRec(loadDayRecord(todayStr));
+    setRec(normalizeDayRecord(loadDayRecord(todayStr)));
   }, [todayStr]);
 
-  /* ---------------- 直近数日から timesIndex を構築 ---------------- */
-  const [currentSig, setCurrentSig] = useState("");
-  const [timesIndex, setTimesIndex] = useState<TimesIndex>({});
+  /* ------ 保存促進バナーのための署名 ------ */
+  const [currentSig, setCurrentSig] = useState(() => calcRecordsSignature());
+  const [lastSaveSig, setLastSaveSig] = useState(() => currentSig);
+  const shouldPromptSave = useMemo(() => currentSig !== lastSaveSig, [currentSig, lastSaveSig]);
 
   useEffect(() => {
-    const all = collectAllDayRecords();
-    setTimesIndex(buildTimesIndex(all));
-    setCurrentSig(calcRecordsSignature(all));
-  }, []);
+    const handler = (e: BeforeUnloadEvent) => {
+      if (shouldPromptSave) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [shouldPromptSave]);
 
-  useEffect(() => {
+  const persist = () => {
+    const normalized = normalizeDayRecord(rec);
+    const current = loadDayRecord(todayStr) as DayRecord | null | undefined;
+    if (!hasAnyData(normalized) && hasAnyData(current ?? undefined)) {
+      if (current) setRec(current);
+      return;
+    }
+    setRec(normalized);
+    saveSafe(todayStr, normalized);
+    setLastSaveSig(calcRecordsSignature());
+    setCurrentSig(calcRecordsSignature());
+  };
+
+  /* ------ 全日データから直近「最後の1回」を取得（SSR安全） ------ */
+  const timesIndex = useMemo(() => {
+    if (!isBrowser) return {} as Record<string, number[]>;
     const all = collectAllDayRecords();
-    setTimesIndex(buildTimesIndex(all));
+    const idx: Record<string, number[]> = {};
+    Object.values(all).forEach((v: any) => {
+      if (!isDayRecordObject(v)) return;
+      const tmap = (v?.times ?? {}) as Record<string, string[]>;
+      Object.entries(tmap).forEach(([exId, arr]) => {
+        if (!Array.isArray(arr)) return;
+        arr.forEach((iso) => {
+          const ts = Date.parse(String(iso));
+          if (Number.isFinite(ts)) (idx[exId] ??= []).push(ts);
+        });
+      });
+    });
+    Object.keys(idx).forEach((k) => idx[k].sort((a, b) => a - b));
+    return idx;
   }, [currentSig]);
 
-  /* ---------------- UI ---------------- */
-  const Header = () => (
-    <div className="w-full bg-white">
-      <div className="mx-auto w-full max-w-none px-0 sm:px-8 pt-4">
-        <div className="text-xl font-semibold">筋トレ記録</div>
-      </div>
+  /* ---------- UI ---------- */
 
-      <div className="mx-auto w-full max-w-none px-0 sm:px-8 pb-2">
-        <div className="text-slate-700">{displayDate}</div>
+  const Banner = () =>
+    shouldPromptSave ? (
+      <div
+        className="fixed top-0 left-0 right-0 z-50 text-center text-xs text-amber-700 bg-amber-50 border-b border-amber-200 py-1"
+        style={{ paddingTop: "env(safe-area-inset-top)" }}
+        aria-live="polite"
+      >
+        10日以上保存していません。右上の「保存」を押してください。
+      </div>
+    ) : null;
+
+  const Header = () => (
+    <div className="sticky top-0 z-40 bg-white/90 backdrop-blur border-b">
+      <div className="mx-auto w-full max-w-none px-0 sm:px-8 py-2 flex items-center justify-between gap-2">
+        <div className="text-xl font-semibold">筋トレ記録</div>
+        <div className="flex items-center gap-2">
+          <button
+            className="px-3 py-1 rounded-md border text-xs bg-white hover:bg-slate-50"
+            onClick={persist}
+          >
+            保存
+          </button>
+        </div>
       </div>
     </div>
   );
 
-  // 50px 正方形
+  const displayDate = useMemo(
+    () =>
+      `${today.getFullYear()}/${String(today.getMonth() + 1).padStart(2, "0")}/${String(
+        today.getDate()
+      ).padStart(2, "0")}`,
+    [today]
+  );
+
   const SquareCount = ({
     value,
     onChange,
@@ -116,9 +236,7 @@ export default function RecordTab() {
         <SelectTrigger className="w-[50px] h-[50px] justify-center">
           <SelectValue placeholder="0" />
         </SelectTrigger>
-        <SelectContent
-          className="z-[60] max-h-[40vh] overflow-y-auto"
-        >
+        <SelectContent className="z-[60] max-h-[40vh] overflow-y-auto">
           {Array.from({ length: Math.min(max, 15) + 1 }, (_, n) => n).map((n) => (
             <SelectItem key={n} value={String(n)}>
               {n}
@@ -134,12 +252,12 @@ export default function RecordTab() {
       className={`w-[50px] h-[50px] min-w-[50px] min-h-[50px] rounded-md border text-center text-xl leading-[50px] ${
         on ? "bg-black text-white border-black" : "bg-white text-slate-700 border-slate-300"
       }`}
+      aria-pressed={on}
     >
       {on ? "✓" : ""}
     </div>
   );
 
-  /* ---------------- カテゴリレンダリング ---------------- */
   const renderCategory = (cat: keyof ExercisesGrouped, label: string) => {
     const items = EXERCISES[cat];
 
@@ -148,7 +266,7 @@ export default function RecordTab() {
         <div className="mb-2 font-semibold">{label}</div>
 
         <div className="space-y-4">
-          {items.map((it) => {
+          {items.map((it: ExerciseItem) => {
             const id = it.id;
             const mode = (it.mode ?? it.inputMode ?? "check") as InputMode;
             const setCount = clampSets(it.sets ?? it.checkCount ?? 3);
@@ -157,21 +275,18 @@ export default function RecordTab() {
             const checksArr = padChecks(rec.sets?.[id], setCount);
             const arrLen = mode === "count" ? countsArr.length : checksArr.length;
 
-            // ★ 修正点：最後に実施した時刻から現在までの経過時間
+            // ★ インターバル（最後の記録からの経過時間）
             const arr = timesIndex[id] ?? [];
-            const last = arr.length ? arr[arr.length - 1] : undefined;
-            const intervalMs =
-              last !== undefined ? Date.now() - new Date(last).getTime() : undefined;
-
-            const max = Math.min(it.repTarget ?? 15, 15);
+            let intervalMs: number | undefined;
+            if (arr.length >= 1) {
+              const lastTs = arr[arr.length - 1];
+              intervalMs = Math.max(0, Date.now() - lastTs);
+            }
 
             return (
-              <div key={id} className="border border-slate-200 rounded-xl p-3 sm:p-4">
-                <div className="flex items-baseline justify-between gap-3">
-                  <div className="font-medium">{it.name}</div>
-                  <div className="text-xs text-slate-500">
-                    目標 {it.repTarget ? `${it.repTarget} 回 × ${setCount} セット` : `${setCount} セット`}
-                  </div>
+              <div key={id} className="p-1 sm:p-4 overflow-hidden">
+                <div className="text-sm text-slate-700 break-words font-medium">
+                  {it.name}
                 </div>
 
                 <div className="mt-2 text-xs text-slate-500 text-right">
@@ -197,16 +312,17 @@ export default function RecordTab() {
                               const prevVal = prevCounts[idx];
                               nextCounts[idx] = v;
 
-                              // ★ countモードでも実施時刻を記録（値が変わったときだけ）
-                              const prevTimes = prev.times?.[id] ?? [];
-                              const nextTimes = (prevVal !== v)
-                                ? [...prevTimes, new Date().toISOString()]
-                                : prevTimes;
+                              // ★ 追加（最小差分）：値が変わったときだけタイムスタンプを追記
+                              const prevTimes = (prev.times?.[id] ?? []);
+                              const nextTimes =
+                                prevVal !== v
+                                  ? [...prevTimes, new Date().toISOString()]
+                                  : prevTimes;
 
                               const next: DayRecord = {
                                 ...prev,
                                 counts: { ...(prev.counts ?? {}), [id]: nextCounts },
-                                times:  { ...(prev.times  ?? {}), [id]: nextTimes },
+                                times: { ...(prev.times ?? {}), [id]: nextTimes },
                                 notesUpper: prev.notesUpper ?? "",
                                 notesLower: prev.notesLower ?? "",
                                 notesEtc: prev.notesEtc ?? "",
@@ -248,7 +364,7 @@ export default function RecordTab() {
                                 notesEtc: prev.notesEtc ?? "",
                               };
                               saveSafe(todayStr, next);
-                              setCurrentSig(calcRecordsSignature()); // → timesIndex再構築
+                              setCurrentSig(calcRecordsSignature());
                               return next;
                             });
                           };
@@ -260,6 +376,7 @@ export default function RecordTab() {
                                 "disabled:opacity-50 disabled:pointer-events-none"
                               )}
                               onClick={toggle}
+                              aria-label={`${it.name} セット${idx + 1}を${on ? "解除" : "完了"}`}
                             >
                               <SquareCheck on={on} />
                             </button>
@@ -282,6 +399,7 @@ export default function RecordTab() {
                 const next = { ...rec, notesUpper: e.target.value ?? "" };
                 setRec(next);
                 saveSafe(todayStr, next);
+                setCurrentSig(calcRecordsSignature());
               }}
               placeholder="上半身に関するメモを記入"
             />
@@ -294,6 +412,7 @@ export default function RecordTab() {
                 const next = { ...rec, notesLower: e.target.value ?? "" };
                 setRec(next);
                 saveSafe(todayStr, next);
+                setCurrentSig(calcRecordsSignature());
               }}
               placeholder="下半身に関するメモを記入"
             />
@@ -306,6 +425,7 @@ export default function RecordTab() {
                 const next = { ...rec, notesEtc: e.target.value ?? "" };
                 setRec(next);
                 saveSafe(todayStr, next);
+                setCurrentSig(calcRecordsSignature());
               }}
               placeholder="その他のメモを記入"
             />
@@ -318,8 +438,14 @@ export default function RecordTab() {
   return (
     <>
       <div className="w-full">
+        {/* バナー */}
         <Banner />
+        {/* ヘッダ */}
         <Header />
+
+        <div className="mx-auto w-full max-w-none px-0 sm:px-8 pt-4">
+          <div className="text-slate-700">{displayDate}</div>
+        </div>
 
         {/* 外枠：スマホは左右余白ゼロ */}
         <div className="w-full max-w-none px-0 sm:px-8 py-4">
@@ -332,89 +458,12 @@ export default function RecordTab() {
   );
 }
 
-/* ============== Utils ============== */
-const EXPORT_FILENAME = "workoutrecord.latest";
-const isBrowser = typeof window !== "undefined";
-
-const toYmd = (d: Date) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-    d.getDate()
-  ).padStart(2, "0")}`;
-
-const clampSets = (n: number) =>
-  Math.max(1, Math.min(10, isFinite(n) ? Math.floor(n) : 3));
-
-const padCounts = (src: number[] | undefined, setCount: number) => {
-  const c = clampSets(setCount);
-  const base = Array.from({ length: c }, (_, i) => (src?.[i] ?? 0));
-  return base;
-};
-const padChecks = (src: boolean[] | undefined, setCount: number) => {
-  const c = clampSets(setCount);
-  const base = Array.from({ length: c }, (_, i) => Boolean(src?.[i]));
-  return base;
-};
-
-/** 直近数日分のレコードを収集（当日含む） */
-function collectAllDayRecords(days: number = 30): Record<string, DayRecord> {
-  const map: Record<string, DayRecord> = {};
-  if (!isBrowser) return map;
-
-  try {
-    const raw = loadJSON<Record<string, DayRecord>>(STORAGE_KEY_DAYRECORD) ?? {};
-    // 最近のキーだけ拾う
-    const now = new Date();
-    const keys = Object.keys(raw).filter((k) => {
-      const d = new Date(k);
-      const diff = Number(now) - Number(d);
-      return diff >= 0 && diff <= days * 24 * 60 * 60 * 1000;
-    });
-    keys.forEach((k) => (map[k] = raw[k]));
-  } catch (e) {
-    console.error(e);
-  }
-  return map;
-}
-
-/** timesIndex を構築：種目ID => 時刻配列 */
-function buildTimesIndex(all: Record<string, DayRecord>): TimesIndex {
-  const idx: TimesIndex = {};
-  Object.values(all).forEach((dr) => {
-    if (!dr?.times) return;
-    Object.entries(dr.times).forEach(([id, arr]) => {
-      if (!idx[id]) idx[id] = [];
-      arr?.forEach((t) => idx[id].push(t));
-    });
-  });
-  // 時系列で昇順
-  Object.keys(idx).forEach((id) => {
-    idx[id].sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
-  });
-  return idx;
-}
-
-/** 現在の全データに対するシグネチャ（timesIndex再構築のトリガ用） */
-function calcRecordsSignature(all?: Record<string, DayRecord>) {
-  const src = all ?? collectAllDayRecords();
-  const ordered = JSON.stringify(src, Object.keys(src).sort());
-  return hashString(ordered);
-};
-
-const hasAnyData = (r?: Partial<DayRecord>) => {
-  if (!r) return false;
-  if ((r.notesUpper ?? "") + (r.notesLower ?? "") + (r.notesEtc ?? "") !== "")
-    return true;
-  if (r.sets && Object.values(r.sets).some((a) => a?.some(Boolean))) return true;
-  if (r.counts && Object.values(r.counts).some((a) => a?.some((n) => (n ?? 0) > 0)))
-    return true;
-  return false;
-};
-
+/* ============== 追加ユーティリティ ============== */
 /** 設定風エクスポート（SSR安全） */
 function saveAsJsonLikeSetting(key: string, data: any) {
   if (!isBrowser) return;
   try {
-    const all = loadJSON<Record<string, DayRecord>>(key) ?? {};
+    const all = loadJSON<Record<string, DayRecordLike>>(key) ?? {};
     const now = new Date();
     const name = `${EXPORT_FILENAME}.${toYmd(now)}.json`;
     const blob = new Blob([JSON.stringify(all, null, 2)], {
@@ -429,14 +478,4 @@ function saveAsJsonLikeSetting(key: string, data: any) {
   } catch (e) {
     console.error(e);
   }
-}
-
-/** 簡易ハッシュ */
-function hashString(s: string) {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) {
-    h = (h << 5) - h + s.charCodeAt(i);
-    h |= 0;
-  }
-  return String(h);
 }
