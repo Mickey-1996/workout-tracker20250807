@@ -117,7 +117,7 @@ function saveAsJsonLikeSettings(filename: string, data: unknown): boolean {
 
 /* ===== インターバル：時間（<1h は 0時間） ===== */
 function formatHours(ms: number): string {
-  if (!isFinite(ms) || ms <= 0) return "0時間";
+  if (!isFinite(ms) || ms <= 0) return "<1時間";
   const hours = Math.floor(ms / (1000 * 60 * 60));
   return `${Math.max(0, hours)}時間`;
 }
