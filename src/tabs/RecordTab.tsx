@@ -422,7 +422,7 @@ export default function RecordTab() {
                 </div>
 
                 <div className="mt-2 text-xs text-slate-500 text-right">
-                  前回からのインターバル：{intervalMs !== undefined ? formatHours(intervalMs) : "0時間"}
+                  前回からのインターバル：{intervalMs !== undefined ? formatHours(intervalMs) : "<1時間"}
                 </div>
 
                 {/* 入力列：右寄せ（実ボックス数ぶんだけ列を生成） */}
